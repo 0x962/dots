@@ -22,7 +22,13 @@ a tree of nodes on a canvas, store it as plain files, run it, and watch it.
   one node with its recorded input and the graph's current instructions
   (edit `nodes/<id>.md`, retry, read), and `dots debug` resumes the node's
   actual claude session to ask it why.
-- **Run view**: planned; the live metro board for a running graph.
+- **Run view** (http://localhost:4517/runs): the live board. A metro graph
+  of the run with status-lit lanes, a stat strip (nodes, found, fixed,
+  cost, elapsed), approval cards for parked human nodes (Approve / Request
+  changes, then Continue), run history, and a node inspector: click a
+  station for its prompt, input, reply, session id, and cost. Runs start
+  from the page (target + cwd) and execute as a detached runner child of
+  the server; the page polls the run file.
 - **Canary DE integration**: planned; the desktop app consumes all three.
 
 ## Node kinds

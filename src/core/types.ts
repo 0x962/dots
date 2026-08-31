@@ -128,5 +128,8 @@ export interface GraphRun {
 	finishedAt: string | null;
 	status: RunStatus;
 	note?: string;
+	/** Where the run's agents execute, so a resume lands in the same place. */
+	cwd?: string;
+	vars?: Record<string, string>;
 	nodes: RunNode[];
 }

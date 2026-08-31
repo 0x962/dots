@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dots · runs</title>
+<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./runs.css">
+</head>
+<body>
+<header class="top">
+	<div class="brand"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span> dots</div>
+	<nav class="views"><a href="/">Editor</a><a href="/runs" class="on">Runs</a></nav>
+	<select id="graph-select" class="sel" aria-label="Graph"></select>
+	<select id="run-select" class="sel" aria-label="Run"></select>
+	<div class="spacer"></div>
+	<input id="target" class="inp" placeholder="target (e.g. a PR URL)" style="width:240px">
+	<input id="cwd" class="inp mono" placeholder="cwd (repo path)" style="width:200px;font-size:10.5px">
+	<button id="start" class="btn primary">Run</button>
+</header>
+<main class="runview">
+	<section class="board" id="board"></section>
+	<aside class="nodepane" id="nodepane"></aside>
+</main>
+<script type="module" src="./runs.ts"></script>
+</body>
+</html>

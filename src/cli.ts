@@ -64,6 +64,8 @@ if (problems.length > 0 && cmd !== "plan") {
 if (cmd === "run") {
 	if (!opt.target) usage();
 	const run = buildRun(bundle, graphName, opt.target);
+	run.cwd = opt.cwd ?? process.cwd();
+	run.vars = vars;
 	await saveRun(run);
 	console.log(`${run.runId} · ${run.nodes.length} nodes · target: ${opt.target}`);
 	const done = await executeRun(bundle, run, opts(opt, vars, opt.target));
@@ -75,7 +77,10 @@ if (cmd === "run") {
 		console.error("no runs");
 		process.exit(1);
 	}
-	const done = await executeRun(bundle, run, opts(opt, vars, run.target));
+	const done = await executeRun(bundle, run, {
+		...opts(opt, { ...(run.vars ?? {}), ...vars }, run.target),
+		cwd: opt.cwd ?? run.cwd ?? process.cwd(),
+	});
 	console.log(`${done.status}`);
 	process.exit(done.status === "failed" ? 1 : 0);
 } else if (cmd === "approve" || cmd === "reject") {
