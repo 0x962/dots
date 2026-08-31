@@ -63,9 +63,9 @@ export function CardNode(props: NodeProps) {
 
 	return (
 		<div className={`n-card ${run ? `st-${run.status}` : ""}`} style={style} title={tooltip}>
-			{seqIndex !== null && <div className="seq-n">{seqIndex}</div>}
 			<Handle type="target" position={Position.Top} id="t" className="port" isConnectable={false} />
 			<div className="n-top">
+				{seqIndex !== null && <span className="n-num">{seqIndex}</span>}
 				<div className="n-title">{meta.title}</div>
 				<span
 					className={`n-circle ${circle.pulse ? "pulsing" : ""} ${circle.faint ? "faint" : ""}`}

@@ -66,6 +66,8 @@ export interface Layout {
 	lanes: Map<string, LaneInfo>;
 	/** The Start and End markers that bracket the main flow. */
 	terminals: Map<string, "start" | "end">;
+	/** Frames that draw no chrome: each one is a frame's only child and itself a frame. */
+	muted: Set<string>;
 	arrows: Arrow[];
 }
 
@@ -73,9 +75,12 @@ export const START_ID = "~start";
 export const END_ID = "~end";
 
 export const CARD_W = 224;
-/** The opening bracket above a container's children, and the closing one below. */
-export const RAIL_H = 56;
-const RAIL_BOTTOM_H = 56;
+/** Room above a frame's children for its header, and below for breathing space. */
+export const RAIL_H = 34;
+const RAIL_BOTTOM_H = 16;
+/** A frame whose only child is another frame draws no chrome of its own. */
+const MUTED_RAIL = 8;
+const FRAME_PAD_X = 14;
 const COL_GAP = 28;
 const ROW_GAP_X = 14;
 const ROW_GAP_Y = 16;
@@ -139,6 +144,16 @@ export function computeLayout(
 	const valid = (list: string[] | undefined, owner: string): string[] =>
 		(list ?? []).filter((c) => doc.nodes[c] && parent.get(c) === owner);
 
+	const muted = new Set<string>();
+	for (const [id, n] of Object.entries(doc.nodes)) {
+		if (!isFrame(n.kind)) continue;
+		const kids = valid(n.children, id);
+		if (kids.length === 1 && isFrame(doc.nodes[kids[0]].kind)) muted.add(kids[0]);
+	}
+	const railTop = (id: string): number => (muted.has(id) ? MUTED_RAIL : RAIL_H);
+	const railBottom = (id: string): number => (muted.has(id) ? MUTED_RAIL : RAIL_BOTTOM_H);
+	const padX = (id: string): number => (muted.has(id) ? 0 : FRAME_PAD_X);
+
 	const gridSize = (members: Size[], wrap: number, minW: number, headerH: number, pad: number): Size => {
 		const rows = chunk(members, wrap);
 		const rowWs = rows.map((r) => r.reduce((t, c) => t + c.w, 0) + ROW_GAP_X * (r.length - 1));
@@ -172,15 +187,19 @@ export function computeLayout(
 			} else if (isFrame(n.kind)) {
 				const children = valid(n.children, id).map((c) => measure(c, trail));
 				if (children.length === 0) {
-					size = { w: EMPTY_W, h: RAIL_H + EMPTY_H + RAIL_BOTTOM_H };
+					size = { w: EMPTY_W, h: railTop(id) + EMPTY_H + railBottom(id) };
 				} else if (KIND[n.kind].flow === "column") {
 					size = {
-						w: Math.max(...children.map((c) => c.w)),
-						h: RAIL_H + children.reduce((t, c) => t + c.h, 0) + COL_GAP * (children.length - 1) + RAIL_BOTTOM_H,
+						w: Math.max(...children.map((c) => c.w)) + padX(id) * 2,
+						h:
+							railTop(id) +
+							children.reduce((t, c) => t + c.h, 0) +
+							COL_GAP * (children.length - 1) +
+							railBottom(id),
 					};
 				} else {
 					const g = gridSize(children, WRAP, 0, 0, 0);
-					size = { w: g.w, h: RAIL_H + g.h + RAIL_BOTTOM_H };
+					size = { w: g.w + padX(id) * 2, h: railTop(id) + g.h + railBottom(id) };
 				}
 			}
 			trail.delete(id);
@@ -264,7 +283,7 @@ export function computeLayout(
 			}
 		};
 		if (KIND[n.kind].flow === "column") {
-			let cy = y + RAIL_H;
+			let cy = y + railTop(id);
 			for (let i = 0; i < children.length; i++) {
 				const c = children[i];
 				const cs = sizes.get(c) ?? { w: CARD_W, h: leafH(c) };
@@ -286,11 +305,12 @@ export function computeLayout(
 				intoClosing(children[children.length - 1]);
 			}
 		} else {
-			// A grid's bracket line is the distributor; an arrow to every child
-			// doglegs across the row and reads as a second bracket line. A lone
-			// child sits on the center line, so threading it stays straight.
-			placeGrid(children, x, y + RAIL_H, size.w, WRAP, id);
-			if (children.length === 1) {
+			// The frame itself is the distributor; an arrow to every child would
+			// dogleg across the row and read as extra wiring. A lone child sits
+			// on the center line, so threading it stays straight. A muted child
+			// draws no chrome, so an arrow at it would point at nothing.
+			placeGrid(children, x + padX(id), y + railTop(id), size.w - padX(id) * 2, WRAP, id);
+			if (children.length === 1 && !muted.has(children[0])) {
 				arrows.push({ from: id, to: children[0], fromHandle: "open" });
 				intoClosing(children[0]);
 			}
@@ -354,7 +374,7 @@ export function computeLayout(
 		}
 	}
 
-	return { rects, order, parent, rfParent, lanes, terminals, arrows };
+	return { rects, order, parent, rfParent, lanes, terminals, muted, arrows };
 }
 
 /**

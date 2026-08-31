@@ -21,22 +21,24 @@
 	cursor: grabbing;
 }
 
-.n-rail .port[data-handlepos="top"] {
-	top: 33px;
+/* Frame ports sit on the region's border: entries on the top edge, exits on
+   the bottom edge. */
+.n-frame .port[data-handlepos="top"] {
+	top: -1px;
 }
-.n-rail .port[data-handlepos="bottom"] {
-	bottom: 33px;
+.n-frame .port[data-handlepos="bottom"] {
+	bottom: -1px;
 }
-.n-rail .port[data-handleid="open"] {
-	top: 33px;
+.n-frame .port[data-handleid="open"] {
+	top: -1px;
 	bottom: auto;
 }
-.n-rail .port[data-handleid="tc"] {
-	bottom: 33px;
+.n-frame .port[data-handleid="tc"] {
+	bottom: -1px;
 	top: auto;
 }
 .n-lane .port[data-handleid="open"] {
-	top: 13px;
+	top: 18px;
 	bottom: auto;
 }
 .react-flow__handle.port {
@@ -56,12 +58,13 @@
 	width: 100%;
 	height: 100%;
 	background: var(--panel);
-	border: 1px solid var(--border-strong);
-	border-radius: 4px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
 	padding: 9px 12px;
 	display: flex;
 	flex-direction: column;
 	gap: 5px;
+	box-shadow: var(--shadow-sm);
 	transition: border-color 0.12s, box-shadow 0.12s, opacity 0.2s;
 }
 .n-card:hover {
@@ -155,24 +158,14 @@
 	font-variant-numeric: tabular-nums;
 }
 
-/* step number on children of a sequence or loop */
-.seq-n {
-	position: absolute;
-	top: -7px;
-	left: -7px;
-	width: 15px;
-	height: 15px;
-	border-radius: 4px;
-	background: var(--panel);
-	border: 1px solid var(--border);
+/* step number on children of a sequence or loop, inline before the title */
+.n-num {
+	flex: none;
+	min-width: 13px;
+	font-size: 10.5px;
 	color: var(--text-faint);
-	font-size: 9.5px;
-	font-weight: 500;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	z-index: 5;
 	font-variant-numeric: tabular-nums;
+	text-align: center;
 }
 
 /* run-status skins shared by cards and frames */
@@ -190,91 +183,64 @@
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--s-waiting) 25%, transparent);
 }
 
-/* ---------- container rail ---------- */
+/* ---------- container region ---------- */
 
-.n-rail {
+/* A container is a quiet region: a hairline border and a faint fill in the
+   kind's hue. The cards and the flow arrows stay the loudest layer. */
+.n-frame {
 	position: relative;
 	width: 100%;
 	height: 100%;
-	transition: opacity 0.2s;
+	border: 1px solid color-mix(in srgb, var(--kc) 16%, var(--border));
+	background: color-mix(in srgb, var(--kc) 3%, transparent);
+	border-radius: 10px;
+	transition: opacity 0.2s, border-color 0.12s;
 }
-/* Brackets: an opening line with down-ticks above the children and a
-   mirrored closing line with up-ticks below. The flow arrow passes through
-   the bracket's center; the circled kind icon sits on the line beside it. */
-.rail-line {
+.n-frame.muted {
+	border-color: transparent;
+	background: none;
+}
+.sel > .n-frame {
+	border-color: var(--accent);
+}
+.st-failed.n-frame {
+	border-color: color-mix(in srgb, var(--s-failed) 45%, var(--border));
+}
+.st-running.n-frame {
+	border-color: color-mix(in srgb, var(--s-running) 40%, var(--border));
+}
+
+.f-head {
 	position: absolute;
-	left: 2px;
-	right: 2px;
-	top: 32px;
-	height: 2px;
-	background: var(--sc, var(--flow));
-}
-.rail-line::before,
-.rail-line::after {
-	content: "";
-	position: absolute;
-	top: 0;
-	width: 2px;
-	height: 11px;
-	background: inherit;
-}
-.rail-line.closing {
-	top: auto;
-	bottom: 32px;
-}
-.rail-line.closing::before,
-.rail-line.closing::after {
-	top: -9px;
-}
-.rail-line::before {
-	left: 0;
-}
-.rail-line::after {
-	right: 0;
-}
-.rail-badge {
-	position: absolute;
-	left: calc(50% - 40px);
-	top: 2px;
-	width: 26px;
-	height: 26px;
-	border-radius: 50%;
-	background: var(--panel);
-	border: 1.25px solid var(--sc, var(--flow));
-	color: var(--kc);
+	top: 8px;
+	left: 10px;
 	display: flex;
 	align-items: center;
-	justify-content: center;
+	gap: 6px;
 	z-index: 3;
 }
-.rail-detail {
-	position: absolute;
-	right: calc(50% + 46px);
-	top: 9px;
-	font-size: 8.5px;
-	font-weight: 500;
-	letter-spacing: 0.02em;
+.f-head .n-num {
+	min-width: 0;
+}
+.f-ico {
+	display: inline-flex;
+	color: color-mix(in srgb, var(--kc) 80%, var(--text-dim));
+}
+.f-detail {
+	font-size: 10.5px;
 	color: var(--text-faint);
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
-	z-index: 3;
-}
-.sel > .n-rail .rail-line {
-	background: var(--accent);
-	opacity: 1;
-}
-.sel > .n-rail .rail-badge {
-	border-color: var(--accent);
 }
 
 .f-empty {
 	position: absolute;
-	left: 0;
-	right: 0;
-	top: 56px;
-	bottom: 56px;
+	left: 10px;
+	right: 10px;
+	top: 34px;
+	bottom: 16px;
 	border: 1px dashed color-mix(in srgb, var(--kc) 35%, var(--border-strong));
-	border-radius: 4px;
+	border-radius: var(--radius);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -298,69 +264,53 @@
 	height: 100%;
 	transition: opacity 0.2s;
 }
-.lane-line {
-	position: absolute;
-	left: 2px;
-	right: 2px;
-	top: 12px;
-	height: 2px;
-	background: var(--lc);
-}
-.lane-line::before,
-.lane-line::after {
-	content: "";
-	position: absolute;
-	top: 0;
-	width: 2px;
-	height: 9px;
-	background: inherit;
-}
-.lane-line::before {
-	left: 0;
-}
-.lane-line::after {
-	right: 0;
-}
+/* The YES / NO pill the gate's branch arrow lands on. */
 .lane-chip {
 	position: absolute;
-	top: 6px;
+	top: 0;
 	left: 50%;
 	transform: translateX(-50%);
-	padding: 0 6px;
-	background: var(--canvas);
-	color: var(--lc);
-	font-size: 8.5px;
-	font-weight: 550;
-	letter-spacing: 0.06em;
-	line-height: 13px;
-	z-index: 3;
-}
-.lane-ghost {
-	position: absolute;
-	left: 0;
-	right: 0;
-	top: 26px;
-	bottom: 0;
-	border: 1px dashed color-mix(in srgb, var(--lc) 30%, var(--border-strong));
-	border-radius: 4px;
-	background: none;
+	height: 18px;
 	display: flex;
 	align-items: center;
-	justify-content: center;
+	padding: 0 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--lc) 12%, var(--panel));
+	border: 1px solid color-mix(in srgb, var(--lc) 35%, var(--border));
+	color: var(--lc);
+	font-size: 9px;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	z-index: 3;
+}
+/* An empty branch: the flow passes straight through. */
+.lane-skip {
+	position: absolute;
+	top: 30px;
+	left: 50%;
+	transform: translateX(-50%);
+	height: 24px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0 12px;
+	border-radius: 999px;
+	border: 1px dashed color-mix(in srgb, var(--lc) 25%, var(--border-strong));
+	background: none;
+	color: var(--text-faint);
+	font-size: 10.5px;
+	font-family: inherit;
+	white-space: nowrap;
+}
+button.lane-skip {
 	cursor: pointer;
 }
-.lane-ghost .lane-add {
-	color: var(--text-faint);
-	opacity: 0;
-	transition: opacity 0.12s;
-}
-.lane-ghost:hover .lane-add {
-	opacity: 1;
+button.lane-skip:hover {
 	color: var(--lc);
+	border-color: var(--lc);
 }
-.lane-ghost.quiet {
-	cursor: default;
-	border-color: color-mix(in srgb, var(--lc) 20%, var(--border));
+.lane-skip .lane-add {
+	flex: none;
 }
 .n-lane.not-taken {
 	opacity: 0.4;
@@ -371,7 +321,7 @@
 .n-term {
 	width: 100%;
 	height: 100%;
-	border-radius: 4px;
+	border-radius: 999px;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -379,6 +329,7 @@
 	gap: 1px;
 	background: var(--panel);
 	border: 1px solid var(--border-strong);
+	box-shadow: var(--shadow-sm);
 	position: relative;
 }
 .n-term.start {

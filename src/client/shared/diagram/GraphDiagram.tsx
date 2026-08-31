@@ -19,6 +19,7 @@ import { KIND } from "../kinds";
 import { computeLayout, frameAt, insertionIndex, laneOf, START_ID, type DiagramDoc, type Rect } from "../layout";
 import { CardNode } from "./CardNode";
 import "./diagram.css";
+import { ElbowEdge } from "./ElbowEdge";
 import { FrameNode } from "./FrameNode";
 import { LaneNode } from "./LaneNode";
 import { TerminalNode } from "./TerminalNode";
@@ -45,6 +46,7 @@ export interface DiagramProps {
 }
 
 const nodeTypes: NodeTypes = { card: CardNode, frame: FrameNode, lane: LaneNode, terminal: TerminalNode };
+const edgeTypes = { elbow: ElbowEdge };
 
 const TOKEN_NAMES = [
 	"--edge",
@@ -180,6 +182,7 @@ function DiagramInner(props: DiagramProps) {
 					mode,
 					isRoot: id === doc.root,
 					seqIndex,
+					muted: layout.muted.has(id),
 					run: runById?.get(id),
 					progress: frame ? progress.get(id) : undefined,
 					onAddInto,
@@ -201,19 +204,10 @@ function DiagramInner(props: DiagramProps) {
 				target: a.to,
 				sourceHandle: a.fromHandle ?? "s",
 				targetHandle: a.toHandle ?? "t",
-				type: "smoothstep",
+				type: "elbow",
 				zIndex: 2400,
-				style: { stroke: color, strokeWidth: 1.6, ...(a.tone === "no" ? { strokeDasharray: "5 4" } : {}) },
-				markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
-				...(a.label
-					? {
-							label: a.label,
-							labelStyle: { fill: color, fontSize: 8.5, fontWeight: 550, letterSpacing: "0.05em" },
-							labelBgStyle: { fill: tokens["--canvas"] || "#eef0f4", fillOpacity: 0.9 },
-							labelBgPadding: [4, 2] as [number, number],
-							labelBgBorderRadius: 4,
-						}
-					: {}),
+				style: { stroke: color, strokeWidth: 1.5, ...(a.tone === "no" ? { strokeDasharray: "5 4" } : {}) },
+				markerEnd: { type: MarkerType.ArrowClosed, width: 13, height: 13, color },
 			};
 		});
 	}, [layout, tokens]);
@@ -227,16 +221,39 @@ function DiagramInner(props: DiagramProps) {
 	}, [rf, rfNodes, rfEdges]);
 
 	// Zoom and pan survive reloads and Editor↔Runs switches: the viewport is
-	// remembered per graph, and fit-to-view runs only on a first open.
+	// remembered per graph. It is restored only while it still shows a fifth
+	// of the graph; a stale zoom that leaves the diagram off screen refits.
+	const wrapRef = useRef<HTMLDivElement>(null);
 	const vpKey = `dots:vp:${docKey.split(":")[0]}`;
 	useEffect(() => {
 		const saved = localStorage.getItem(vpKey);
 		const t = setTimeout(() => {
-			if (saved) {
-				void rf.setViewport(JSON.parse(saved) as { x: number; y: number; zoom: number });
-			} else {
-				void rf.fitView({ padding: 0.1, maxZoom: 1 });
+			const el = wrapRef.current;
+			if (saved && el) {
+				const vp = JSON.parse(saved) as { x: number; y: number; zoom: number };
+				let minX = Infinity;
+				let minY = Infinity;
+				let maxX = -Infinity;
+				let maxY = -Infinity;
+				for (const r of current.current.layout.rects.values()) {
+					minX = Math.min(minX, r.x);
+					minY = Math.min(minY, r.y);
+					maxX = Math.max(maxX, r.x + r.w);
+					maxY = Math.max(maxY, r.y + r.h);
+				}
+				const sx = minX * vp.zoom + vp.x;
+				const sy = minY * vp.zoom + vp.y;
+				const ex = maxX * vp.zoom + vp.x;
+				const ey = maxY * vp.zoom + vp.y;
+				const visW = Math.min(ex, el.clientWidth) - Math.max(sx, 0);
+				const visH = Math.min(ey, el.clientHeight) - Math.max(sy, 0);
+				const frac = visW > 0 && visH > 0 ? (visW * visH) / ((ex - sx) * (ey - sy)) : 0;
+				if (frac > 0.2) {
+					void rf.setViewport(vp);
+					return;
+				}
 			}
+			void rf.fitView({ padding: 0.12, maxZoom: 1 });
 		}, 40);
 		return () => clearTimeout(t);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -315,11 +332,12 @@ function DiagramInner(props: DiagramProps) {
 	};
 
 	return (
-		<div className="diagram" onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setHighlight(null)}>
+		<div ref={wrapRef} className="diagram" onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setHighlight(null)}>
 			<ReactFlow
 				defaultNodes={[]}
 				defaultEdges={[]}
 				nodeTypes={nodeTypes}
+				edgeTypes={edgeTypes}
 				proOptions={{ hideAttribution: true }}
 				minZoom={0.2}
 				maxZoom={1.6}
@@ -338,22 +356,26 @@ function DiagramInner(props: DiagramProps) {
 			>
 				<Background variant={BackgroundVariant.Dots} gap={24} size={1.4} color={tokens["--dot"] || "#d0d4dc"} />
 				<Controls showInteractive={false} position="bottom-right" />
-				<MiniMap
-					pannable
-					zoomable
-					position="bottom-left"
-					style={{ width: 160, height: 104 }}
-					maskColor={(tokens["--canvas"] || "#eef0f4") + "c9"}
-					bgColor={tokens["--canvas"] || undefined}
-					nodeColor={(n) => {
-						const meta = (n.data as { meta?: { kind: NodeKind } }).meta;
-						if (!meta) return "transparent";
-						if (KIND[meta.kind].flow !== "leaf") return "transparent";
-						const varName = KIND[meta.kind].color.slice(4, -1);
-						return tokens[varName] || "#888";
-					}}
-					nodeStrokeWidth={0}
-				/>
+				{/* A small graph fits on screen whole; the minimap only earns its
+				    corner once there is something off screen to find. */}
+				{Object.keys(doc.nodes).length >= 16 && (
+					<MiniMap
+						pannable
+						zoomable
+						position="bottom-left"
+						style={{ width: 160, height: 104 }}
+						maskColor={(tokens["--canvas"] || "#eef0f4") + "c9"}
+						bgColor={tokens["--canvas"] || undefined}
+						nodeColor={(n) => {
+							const meta = (n.data as { meta?: { kind: NodeKind } }).meta;
+							if (!meta) return tokens["--dot"] || "#333";
+							if (KIND[meta.kind].flow !== "leaf") return tokens["--dot"] || "#333";
+							const varName = KIND[meta.kind].color.slice(4, -1);
+							return tokens[varName] || "#888";
+						}}
+						nodeStrokeWidth={0}
+					/>
+				)}
 				{highlight && (
 					<ViewportPortal>
 						<div
