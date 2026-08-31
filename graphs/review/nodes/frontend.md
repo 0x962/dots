@@ -1,0 +1,1 @@
+Answer YES when the diff adds or changes user interface code: a component, a page, a template, a stylesheet, or markup in any framework. Answer NO otherwise, naming the files that decide it. On YES, name the screens or components to focus on.
