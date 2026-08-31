@@ -16,6 +16,7 @@ function remembered(graph: string): Remembered {
 
 export function RunDialog({
 	graph,
+	graphs,
 	onClose,
 	onStarted,
 	pinTarget,
@@ -24,8 +25,10 @@ export function RunDialog({
 	beforeStart,
 }: {
 	graph: string;
+	/** When given, the dialog lets the person pick which graph to run. */
+	graphs?: string[];
 	onClose: () => void;
-	onStarted: (runId: string) => void;
+	onStarted: (runId: string, graph: string) => void;
 	/** Embed mode pins the run to one target. */
 	pinTarget?: string;
 	defaultCwd?: string;
@@ -33,27 +36,36 @@ export function RunDialog({
 	dirty?: boolean;
 	beforeStart?: () => Promise<boolean>;
 }) {
-	const last = remembered(graph);
+	const [g, setG] = useState(graph);
+	const last = remembered(g);
 	const [target, setTarget] = useState(pinTarget ?? last.target);
 	const [cwd, setCwd] = useState(defaultCwd ?? last.cwd);
 	const [vars, setVars] = useState<Array<{ k: string; v: string }>>(last.vars);
 	const [busy, setBusy] = useState(false);
+
+	const pickGraph = (name: string) => {
+		setG(name);
+		const mem = remembered(name);
+		if (!pinTarget) setTarget(mem.target);
+		if (!defaultCwd) setCwd(mem.cwd);
+		setVars(mem.vars);
+	};
 
 	const start = async () => {
 		if (!target.trim()) return;
 		setBusy(true);
 		try {
 			if (beforeStart && !(await beforeStart())) return;
-			localStorage.setItem(`dots:last-run:${graph}`, JSON.stringify({ target, cwd, vars }));
+			localStorage.setItem(`dots:last-run:${g}`, JSON.stringify({ target, cwd, vars }));
 			const varMap = Object.fromEntries(
 				vars.filter((r) => r.k.trim()).map((r) => [r.k.trim(), r.v]),
 			);
-			const { runId } = await api.startRun(graph, {
+			const { runId } = await api.startRun(g, {
 				target: target.trim(),
 				cwd: cwd.trim() || undefined,
 				vars: varMap,
 			});
-			onStarted(runId);
+			onStarted(runId, g);
 		} catch (error) {
 			toast(error instanceof Error ? error.message : String(error), "error");
 		} finally {
@@ -65,12 +77,24 @@ export function RunDialog({
 		<div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
 			<div className="modal">
 				<header>
-					Run {graph}
+					{graphs ? "New run" : `Run ${g}`}
 					<button type="button" className="btn ghost icon sm" onClick={onClose}>
 						<X size={14} />
 					</button>
 				</header>
 				<div className="body">
+					{graphs && (
+						<div className="field">
+							<label>Graph</label>
+							<select className="select" value={g} onChange={(e) => pickGraph(e.target.value)}>
+								{graphs.map((name) => (
+									<option key={name} value={name}>
+										{name}
+									</option>
+								))}
+							</select>
+						</div>
+					)}
 					<div className="field">
 						<label>Target</label>
 						<input

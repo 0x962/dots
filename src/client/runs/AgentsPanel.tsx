@@ -5,10 +5,24 @@ import { nodeDurationMs } from "../shared/diagram/CardNode";
 import { fmtDur } from "../shared/diagram/tokens";
 import { KIND } from "../shared/kinds";
 
-function lastLine(stream: string): string {
+/** A tool event line carries raw JSON arguments; show the tool and its first
+    string value ("⏺ Bash git log …") instead of the braces. */
+function cleanLine(line: string): string {
+	const m = /^⏺ (\w+) (\{.*)$/.exec(line);
+	if (!m) return line;
+	const v = /"(?:command|description|file_path|path|pattern|url|query|prompt)":"((?:[^"\\]|\\.)*)"/.exec(m[2]);
+	return v ? `⏺ ${m[1]} ${v[1]}` : `⏺ ${m[1]}`;
+}
+
+function lastLines(stream: string, count: number): string {
 	const lines = stream.split("\n").map((l) => l.trim()).filter(Boolean);
-	const line = lines[lines.length - 1] ?? "";
-	return line.length > 110 ? `${line.slice(0, 110)}…` : line;
+	return lines
+		.slice(-count)
+		.map((l) => {
+			const c = cleanLine(l);
+			return c.length > 160 ? `${c.slice(0, 160)}…` : c;
+		})
+		.join("\n");
 }
 
 /**
@@ -43,7 +57,7 @@ export function AgentsPanel({
 			const ids = running.map((n) => n.id);
 			const details = await Promise.all(ids.map((id) => api.nodeDetail(graph, runId, id)));
 			if (stop) return;
-			setTails(Object.fromEntries(ids.map((id, i) => [id, lastLine(details[i].stream)])));
+			setTails(Object.fromEntries(ids.map((id, i) => [id, lastLines(details[i].stream, 4)])));
 		};
 		void poll();
 		const iv = setInterval(() => void poll(), 2000);
@@ -84,7 +98,7 @@ export function AgentsPanel({
 									{n.title}
 									{dur !== null && <span className="ap-dur">{fmtDur(dur)}</span>}
 								</div>
-								<div className="ap-tail">{tails[n.id] || "starting…"}</div>
+								<pre className="ap-tail">{tails[n.id] || "starting…"}</pre>
 							</div>
 						</button>
 					);

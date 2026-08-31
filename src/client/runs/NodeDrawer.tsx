@@ -8,7 +8,7 @@ import { KIND, STATUS } from "../shared/kinds";
 import { Markdown } from "../shared/Markdown";
 import { toast } from "../shared/toast";
 
-type Tab = "live" | "reply" | "prompt" | "input";
+type Tab = "work" | "reply" | "prompt" | "input";
 
 export function NodeDrawer({
 	graph,
@@ -28,7 +28,7 @@ export function NodeDrawer({
 }) {
 	const [detail, setDetail] = useState<NodeDetail | null>(null);
 	const running = node.status === "running";
-	const [tab, setTab] = useState<Tab>(running ? "live" : "reply");
+	const [tab, setTab] = useState<Tab>(running ? "work" : "reply");
 	const [note, setNote] = useState("");
 	const kind = KIND[node.kind];
 	const status = STATUS[node.status];
@@ -50,20 +50,21 @@ export function NodeDrawer({
 		return () => clearInterval(iv);
 	}, [graph, runId, node.id, node.status, node.finishedAt]);
 
-	// The live tab exists only while the node runs; hand over to Reply after.
+	// The moment the node settles, hand over from the work tail to the reply;
+	// the Work tab stays available for reading the transcript back.
 	useEffect(() => {
-		if (!running && tab === "live") setTab("reply");
-		if (running && tab === "reply") setTab("live");
+		if (!running && tab === "work") setTab("reply");
+		if (running && tab === "reply") setTab("work");
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [running]);
 
 	useEffect(() => {
 		const el = bodyRef.current;
-		if (el && tab === "live") el.scrollTop = el.scrollHeight;
-	}, [detail?.stream, tab]);
+		if (el && tab === "work" && running) el.scrollTop = el.scrollHeight;
+	}, [detail?.stream, tab, running]);
 
 	const body =
-		tab === "live"
+		tab === "work"
 			? detail?.stream
 			: tab === "reply"
 				? detail?.reply
@@ -147,17 +148,19 @@ export function NodeDrawer({
 			{hasTranscript && (
 				<div className="dr-section">
 					<div className="seg dr-tabs">
-						{((running ? ["live", "prompt", "input"] : ["reply", "prompt", "input"]) as Tab[]).map((t) => (
+						{((running ? ["work", "prompt", "input"] : ["reply", "work", "prompt", "input"]) as Tab[]).map((t) => (
 							<button key={t} type="button" className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-								{t === "live" ? "Live" : t === "reply" ? "Reply" : t === "prompt" ? "Prompt" : "Input"}
+								{t === "work" ? "Work" : t === "reply" ? "Reply" : t === "prompt" ? "Prompt" : "Input"}
 							</button>
 						))}
 					</div>
 					<div className="dr-body" ref={bodyRef}>
 						{detail === null ? (
 							<div className="dr-empty">Loading…</div>
-						) : tab === "live" ? (
-							<pre className="dr-pre dr-live">{body || "waiting for the agent's first output…"}</pre>
+						) : tab === "work" ? (
+							<pre className="dr-pre dr-live">
+								{body || (running ? "waiting for the agent's first output…" : "No work recorded.")}
+							</pre>
 						) : !body ? (
 							<div className="dr-empty">
 								{tab === "reply" ? "No reply yet." : tab === "prompt" ? "No prompt recorded." : "No input recorded."}

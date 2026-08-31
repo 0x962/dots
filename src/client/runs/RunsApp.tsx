@@ -1,7 +1,7 @@
-import { Play, RotateCcw } from "lucide-react";
+import { ExternalLink, Play, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphBundle } from "../../core/types";
-import { api, type LiveRun, type RunSummary } from "../shared/api";
+import { api, type LiveRun } from "../shared/api";
 import { GraphDiagram } from "../shared/diagram/GraphDiagram";
 import { fmtDur } from "../shared/diagram/tokens";
 import type { DiagramDoc, DiagramMeta } from "../shared/layout";
@@ -10,7 +10,7 @@ import { toast } from "../shared/toast";
 import { Toasts } from "../shared/Toasts";
 import { AgentsPanel } from "./AgentsPanel";
 import { NodeDrawer } from "./NodeDrawer";
-import { RunMenu } from "./RunMenu";
+import { RunList, targetLabel, targetUrl, type RunRow } from "./RunList";
 
 const PARAMS = new URLSearchParams(location.search);
 const EMBED = PARAMS.get("embed") === "1";
@@ -51,7 +51,7 @@ function verdictOf(run: LiveRun): { word: string; cls: string; detail: string } 
 export function RunsApp() {
 	const [graphs, setGraphs] = useState<string[]>([]);
 	const [graph, setGraph] = useState<string | null>(PARAMS.get("g"));
-	const [summaries, setSummaries] = useState<RunSummary[]>([]);
+	const [rows, setRows] = useState<RunRow[]>([]);
 	const [runId, setRunId] = useState<string | null>(PARAMS.get("run"));
 	const [run, setRun] = useState<LiveRun | null>(null);
 	const [bundle, setBundle] = useState<GraphBundle | null>(null);
@@ -63,27 +63,27 @@ export function RunsApp() {
 	state.current = { graph, runId };
 
 	useEffect(() => {
-		void api.graphs().then((gs) => {
-			setGraphs(gs);
-			setGraph((g) => (g && gs.includes(g) ? g : (gs[0] ?? null)));
-		});
-	}, []);
-
-	useEffect(() => {
 		if (!graph) return;
 		setBundle(null);
 		void api.graph(graph).then(setBundle, () => setBundle(null));
 	}, [graph]);
 
 	const refresh = async () => {
+		const gs = await api.graphs();
+		setGraphs(gs);
+		const lists = await Promise.all(
+			gs.map(async (g) => (await api.runs(g)).map((s): RunRow => ({ ...s, graph: g }))),
+		);
+		let all = lists.flat().sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+		if (PIN_TARGET) all = all.filter((s) => s.target === PIN_TARGET);
+		setRows(all);
 		const { graph: g, runId: r } = state.current;
-		if (!g) return;
-		let list = await api.runs(g);
-		if (PIN_TARGET) list = list.filter((s) => s.target === PIN_TARGET);
-		setSummaries(list);
-		const wanted = r && list.some((s) => s.runId === r) ? r : (list[0]?.runId ?? null);
-		if (wanted !== r) setRunId(wanted);
-		if (wanted) setRun(await api.run(g, wanted));
+		const wanted = (r && all.find((s) => s.runId === r && s.graph === g)) || all[0] || null;
+		if (wanted && (wanted.runId !== r || wanted.graph !== g)) {
+			setGraph(wanted.graph);
+			setRunId(wanted.runId);
+		}
+		if (wanted) setRun(await api.run(wanted.graph, wanted.runId));
 		else setRun(null);
 	};
 
@@ -122,6 +122,7 @@ export function RunsApp() {
 		: 0;
 	const verdict = run ? verdictOf(run) : null;
 	const selected = selection ? (runById.get(selection) ?? null) : null;
+	const prUrl = run ? targetUrl(run.target) : null;
 
 	return (
 		<div className="app">
@@ -140,92 +141,89 @@ export function RunsApp() {
 						</nav>
 					</>
 				)}
-				{PIN_TARGET && (
-					<span className="pin-target mono" title={PIN_TARGET}>
-						{PIN_TARGET}
-					</span>
-				)}
 				<span className="spacer" />
-				{run && !run.live && run.status !== "done" && (
-					<button type="button" className="btn" onClick={() => void resume()}>
-						<RotateCcw size={13} /> Resume
-					</button>
-				)}
-				{!EMBED && (
-					<select
-						className="select"
-						style={{ width: 140 }}
-						value={graph ?? ""}
-						onChange={(e) => {
-							setGraph(e.target.value);
-							setRunId(null);
-							setSelection(null);
-						}}
-					>
-						{graphs.map((g) => (
-							<option key={g} value={g}>
-								{g}
-							</option>
-						))}
-					</select>
-				)}
-				<RunMenu
-					summaries={summaries}
-					runId={runId}
-					onPick={(id) => {
-						setRunId(id);
-						setSelection(null);
-					}}
-					onNew={() => setDialog(true)}
-				/>
+				<button type="button" className="btn primary" onClick={() => setDialog(true)}>
+					<Play size={13} /> New run
+				</button>
 			</header>
 
-			{run && verdict && (
-				<div className="statstrip">
-					<span className={`verdict v-${verdict.cls}`}>
-						<span className="s-dot" />
-						{verdict.word}
-						{verdict.detail && <em>· {verdict.detail}</em>}
-					</span>
-					<span className="stat-target mono" title={run.target}>
-						{run.target}
-					</span>
-					<span className="spacer" />
-					<span className="stat">
-						<b>
-							{settled}/{run.nodes.length}
-						</b>{" "}
-						nodes
-					</span>
-					<span className="stat-time">{fmtDur(elapsed)}</span>
-				</div>
-			)}
-
 			<div className="main">
-				<div className="canvas-wrap">
-					{doc && run ? (
-						<GraphDiagram
-							docKey={`${graph}:${run.runId}`}
-							doc={doc}
-							mode="run"
-							selection={selection}
-							onSelect={setSelection}
-							runById={runById}
-							onAnswer={(id, approve) => {
-								if (approve) void answer(id, true, "");
-								else setSelection(id);
-							}}
-						/>
-					) : (
-						<div className="empty-state">
-							<p>{graph ? "No runs of this graph yet." : "No graphs yet."}</p>
-							{graph && (
-								<button type="button" className="btn primary" onClick={() => setDialog(true)}>
-									<Play size={13} /> Start the first run
+				{!EMBED && (
+					<RunList
+						rows={rows}
+						graph={graph}
+						runId={runId}
+						onPick={(row) => {
+							setGraph(row.graph);
+							setRunId(row.runId);
+							setSelection(null);
+						}}
+					/>
+				)}
+				<div className="center">
+					{run && verdict && (
+						<div className="runhead">
+							<span className={`verdict v-${verdict.cls}`}>
+								<span className="s-dot" />
+								{verdict.word}
+								{verdict.detail && <em>· {verdict.detail}</em>}
+							</span>
+							{prUrl ? (
+								<a className="runhead-target" href={prUrl} target="_blank" rel="noreferrer" title={run.target}>
+									{targetLabel(run.target)}
+									<ExternalLink size={11} />
+								</a>
+							) : (
+								<span className="runhead-target plain" title={run.target}>
+									{targetLabel(run.target)}
+								</span>
+							)}
+							<span className="runhead-meta">{graph}</span>
+							{run.cwd && (
+								<span className="runhead-meta mono" title={run.cwd}>
+									{run.cwd}
+								</span>
+							)}
+							<span className="spacer" />
+							{!run.live && run.status !== "done" && (
+								<button type="button" className="btn sm" onClick={() => void resume()}>
+									<RotateCcw size={12} /> Resume
 								</button>
 							)}
+							<span className="stat">
+								<b>
+									{settled}/{run.nodes.length}
+								</b>{" "}
+								nodes
+							</span>
+							<span className="stat-time">{fmtDur(elapsed)}</span>
 						</div>
 					)}
+					<div className="canvas-wrap">
+						{doc && run && graph ? (
+							<GraphDiagram
+								docKey={`${graph}:${run.runId}`}
+								doc={doc}
+								mode="run"
+								selection={selection}
+								onSelect={setSelection}
+								runById={runById}
+								onAnswer={(id, approve) => {
+									if (approve) void answer(id, true, "");
+									else setSelection(id);
+								}}
+							/>
+						) : (
+							<div className="empty-state">
+								<p>{graphs.length > 0 ? "No runs yet." : "No graphs yet."}</p>
+								{graphs.length > 0 && (
+									<button type="button" className="btn primary" onClick={() => setDialog(true)}>
+										<Play size={13} /> Start the first run
+									</button>
+								)}
+							</div>
+						)}
+					</div>
 				</div>
 				{graph && run && selected ? (
 					<NodeDrawer
@@ -241,14 +239,16 @@ export function RunsApp() {
 				) : null}
 			</div>
 
-			{dialog && graph && (
+			{dialog && (
 				<RunDialog
-					graph={graph}
+					graph={graph ?? graphs[0] ?? ""}
+					graphs={EMBED ? undefined : graphs}
 					pinTarget={PIN_TARGET || undefined}
 					defaultCwd={PIN_CWD || undefined}
 					onClose={() => setDialog(false)}
-					onStarted={(id) => {
+					onStarted={(id, g) => {
 						setDialog(false);
+						setGraph(g);
 						setRunId(id);
 						setSelection(null);
 					}}
