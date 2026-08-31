@@ -23,6 +23,17 @@ const S = {
 };
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
+
+/**
+ * Embed mode is how Canary DE (or anything else) mounts this page as a
+ * pane: ?embed=1 hides the chrome, ?target pins the run list and the Run
+ * button to one target (a PR), ?cwd tells new runs where to execute, and
+ * ?theme overrides the color scheme.
+ */
+const PARAMS = new URLSearchParams(location.search);
+const EMBED = PARAMS.get("embed") === "1";
+const PIN_TARGET = PARAMS.get("target") ?? "";
+const PIN_CWD = PARAMS.get("cwd") ?? "";
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 /* ---------------- data ---------------- */
@@ -34,6 +45,7 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
 
 async function refreshRuns(): Promise<void> {
 	S.runs = (await j<{ runs: RunSummary[] }>(`/api/graphs/${S.graph}/runs`)).runs;
+	if (PIN_TARGET) S.runs = S.runs.filter((r) => r.target === PIN_TARGET);
 	const sel = $("run-select") as HTMLSelectElement;
 	sel.innerHTML = S.runs
 		.map((r) => `<option value="${r.runId}">${r.runId.slice(4, 23)} · ${r.status}</option>`)
@@ -229,7 +241,7 @@ function render(): void {
 	const board = $("board");
 	const run = S.run;
 	if (!run) {
-		board.innerHTML = `<div class="statusline sl-idle"><span class="txt"><b>no runs yet</b> · start one with a target above</span></div>`;
+		board.innerHTML = `<div class="statusline sl-idle"><span class="txt"><b>no runs yet</b> · ${PIN_TARGET ? "Run review starts the first one" : "start one with a target above"}</span></div>`;
 		$("nodepane").innerHTML = "";
 		return;
 	}
@@ -366,13 +378,23 @@ async function showNode(): Promise<void> {
 /* ---------------- boot ---------------- */
 
 async function main(): Promise<void> {
+	const theme = PARAMS.get("theme");
+	if (theme === "dark" || theme === "light") {
+		document.documentElement.dataset.theme = theme;
+	}
+	if (EMBED) document.body.classList.add("embed");
 	const graphs = (await j<{ graphs: string[] }>("/api/graphs")).graphs;
 	const gsel = $("graph-select") as HTMLSelectElement;
 	gsel.innerHTML = graphs.map((g) => `<option>${g}</option>`).join("");
 	const params = new URLSearchParams(location.search);
 	S.graph = params.get("g") && graphs.includes(params.get("g") as string) ? (params.get("g") as string) : graphs[0] ?? "";
 	gsel.value = S.graph;
-	($("cwd") as HTMLInputElement).value = "";
+	($("cwd") as HTMLInputElement).value = PIN_CWD;
+	if (PIN_TARGET) {
+		($("target") as HTMLInputElement).value = PIN_TARGET;
+		($("target") as HTMLInputElement).readOnly = true;
+		($("start") as HTMLElement).textContent = "Run review";
+	}
 	gsel.addEventListener("change", async () => {
 		S.graph = gsel.value;
 		S.runId = "";

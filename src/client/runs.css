@@ -83,3 +83,9 @@
 .nodepane .tabs button.on{color:var(--text);border-color:var(--hl)}
 .nodepane pre{background:var(--surface);border:1px solid var(--border-soft);border-radius:7px;padding:12px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:62vh;overflow-y:auto}
 .badgechip{display:inline-block;font-size:10px;background:var(--chipbg);border-radius:4px;padding:1px 6px;margin-right:5px;color:var(--muted)}
+
+/* embed mode: the host app owns the chrome; this page is only the pane */
+body.embed .brand,body.embed .views,body.embed #graph-select{display:none}
+body.embed .top{padding:6px 10px;gap:8px}
+body.embed .top #target{flex:1;min-width:0}
+body.embed .board{width:420px}
