@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"name": "hello",
+	"root": "main",
+	"nodes": {
+		"main": { "kind": "sequence", "title": "Hello", "children": ["greet", "check"] },
+		"greet": { "kind": "agent", "title": "Greet", "children": [] },
+		"check": { "kind": "gate", "title": "Did we greet?", "children": ["cheer"] },
+		"cheer": { "kind": "agent", "title": "Cheer", "children": [] }
+	}
+}

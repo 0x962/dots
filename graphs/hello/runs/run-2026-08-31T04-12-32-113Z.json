@@ -1,0 +1,50 @@
+{
+	"runId": "run-2026-08-31T04-12-32-113Z",
+	"graphName": "hello",
+	"target": "the standalone runner",
+	"startedAt": "2026-08-31T04:12:32.113Z",
+	"finishedAt": "2026-08-31T04:12:44.206Z",
+	"status": "done",
+	"nodes": [
+		{
+			"id": "main",
+			"parentId": null,
+			"kind": "sequence",
+			"title": "Hello",
+			"status": "ok",
+			"startedAt": "2026-08-31T04:12:32.115Z",
+			"finishedAt": "2026-08-31T04:12:44.206Z"
+		},
+		{
+			"id": "greet",
+			"parentId": "main",
+			"kind": "agent",
+			"title": "Greet",
+			"status": "ok",
+			"startedAt": "2026-08-31T04:12:32.115Z",
+			"output": "OUTPUT: hello from dots to the standalone runner",
+			"finishedAt": "2026-08-31T04:12:36.376Z"
+		},
+		{
+			"id": "check",
+			"parentId": "main",
+			"kind": "gate",
+			"title": "Did we greet?",
+			"status": "ok",
+			"startedAt": "2026-08-31T04:12:36.376Z",
+			"note": "YES: the greeting reached the standalone runner intact, so downstream nodes can treat the hello path as working.",
+			"output": "YES: the greeting reached the standalone runner intact, so downstream nodes can treat the hello path as working.",
+			"finishedAt": "2026-08-31T04:12:44.206Z"
+		},
+		{
+			"id": "cheer",
+			"parentId": "check",
+			"kind": "agent",
+			"title": "Cheer",
+			"status": "ok",
+			"startedAt": "2026-08-31T04:12:40.143Z",
+			"output": "Nice, the hello landed clean and cheerful on the standalone runner's doorstep!\n\nOUTPUT: Cheer confirms the greeting arrived intact at the standalone runner.",
+			"finishedAt": "2026-08-31T04:12:44.205Z"
+		}
+	]
+}

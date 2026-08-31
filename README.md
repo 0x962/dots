@@ -6,7 +6,14 @@ a tree of nodes on a canvas, store it as plain files, run it, and watch it.
 ## The pieces
 
 - **Editor** (`bun dev`, then http://localhost:4517): a canvas graph builder.
-- **Execution layer**: planned; runs a graph against a target.
+- **Runner** (`./dots run <graph> --target <text>`): a deterministic
+  scheduler walks the tree and spawns one agent per node (the prompt arrives
+  on stdin; the command comes from `DOTS_AGENT_CMD`, default `claude -p
+  --dangerously-skip-permissions`). Run state lands in
+  `graphs/<name>/runs/<runId>.json` after every transition, transcripts in
+  `runs/<runId>.d/`. `dots approve|reject` answers a parked human node,
+  `dots resume` carries a run on, `dots plan` prints the tree, `dots runs`
+  lists history. `--var K=V` fills `{K}` in briefing and instructions.
 - **Run view**: planned; the live metro board for a running graph.
 - **Canary DE integration**: planned; the desktop app consumes all three.
 
