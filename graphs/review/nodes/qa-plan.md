@@ -1,1 +1,0 @@
-From the summary, write the QA plan a person or an agent runs before merge: every user-visible flow this change touches, how to exercise each one, the data it needs, and what a pass looks like. When the repository has a per-PR live environment, name the exact requests or clicks to run against it. Return the plan as OUTPUT.

@@ -1,1 +1,0 @@
-Answer DONE when no certain finding remains unapplied, or when nothing applied in the last round changed the answer. Answer AGAIN, naming what is left, when a certain finding still waits and a round remains.

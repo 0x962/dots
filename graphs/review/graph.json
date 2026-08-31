@@ -8,9 +8,7 @@
 			"title": "Review",
 			"children": [
 				"summarize",
-				"fanout",
-				"fix-loop",
-				"wrap-up"
+				"fanout"
 			]
 		},
 		"summarize": {
@@ -22,30 +20,10 @@
 			"kind": "parallel",
 			"title": "At the same time",
 			"children": [
-				"qa",
 				"frontend",
 				"backend",
 				"readability"
 			]
-		},
-		"qa": {
-			"kind": "sequence",
-			"title": "QA",
-			"children": [
-				"qa-plan",
-				"qa-approve"
-			]
-		},
-		"qa-plan": {
-			"kind": "agent",
-			"title": "QA plan",
-			"children": [],
-			"action": "report"
-		},
-		"qa-approve": {
-			"kind": "human",
-			"title": "Approve the QA plan",
-			"children": []
 		},
 		"frontend": {
 			"kind": "gate",
@@ -91,115 +69,72 @@
 				"naming",
 				"dead-code",
 				"file-size"
-			]
+			],
+			"elseChildren": []
 		},
 		"shared-components": {
 			"kind": "agent",
 			"title": "Shared components",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Move an element into the shared library and update the call sites `rg` finds. Do not change how a screen looks or behaves while you move it. A shared component that other packages already import is a report, never an edit."
+			"children": []
 		},
 		"design-tokens": {
 			"kind": "agent",
 			"title": "Design tokens",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Replace a literal with the token that already carries the same value. When no token matches, report it: a new token is a design decision, not a review fix. Never change how a screen looks in order to reach a token."
+			"children": []
 		},
 		"render-cost": {
 			"kind": "agent",
 			"title": "Render cost",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Fix a key, an effect dependency, or a computation this pull request adds. Report anything that needs a new library, a virtualised list, or a change to how the data arrives: those are design decisions, not review fixes."
+			"children": []
 		},
 		"no-fallbacks": {
 			"kind": "agent",
 			"title": "No fallbacks",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Delete a fallback only on a line the diff adds or changes. A fallback that already exists on the base branch is a finding, never an edit. When a caller depends on the quiet result the fallback returns, report the fallback instead of deleting it."
+			"children": []
 		},
 		"thin-views-and-models": {
 			"kind": "agent",
 			"title": "Thin views and models",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Move logic out of a view or a model only when this pull request is what put the logic there. Logic that already sits on the base branch is a finding, never an edit. Move it into the service that already owns the domain; do not start a new service without saying so in the finding."
+			"children": []
 		},
 		"service-boundaries": {
 			"kind": "agent",
 			"title": "Service boundaries",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Redirect a call this pull request adds so that it goes through the other service's public function. Never move a module between services, never change another service's public signature, and never break a cycle by deleting a feature: report those."
+			"children": []
 		},
 		"rest-api": {
 			"kind": "agent",
 			"title": "REST API",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Change only an endpoint this pull request adds. An endpoint that already exists on the base branch has clients you cannot see, so report it and change nothing. When you change a new endpoint, update every caller of it that `rg` finds in this repository, in the same pass."
+			"children": []
 		},
 		"module-layout": {
 			"kind": "agent",
 			"title": "Module layout",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Move a class this pull request adds, and in the same pass update the package `__init__.py`, its `__all__`, and every importer `rg` finds. Never move a class that already sits on the base branch: report it. Never rename a model class, never move a model to another Django app, and never edit a migration."
+			"children": []
 		},
 		"code-comments": {
 			"kind": "agent",
 			"title": "Code comments",
-			"children": [],
-			"action": "fix",
-			"fixBoundary": "Rewrite and delete comments only. Never change a statement, an expression, a signature, or a name, with one exception: rename a helper whose own name carries jargon, and then update every call site in this repository."
+			"children": []
 		},
 		"naming": {
 			"kind": "agent",
 			"title": "Naming",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Rename a symbol this pull request adds, and update every call site `rg` finds in this repository. Never rename a symbol that already exists on the base branch, a public API field, a database column, or anything another repository imports: report those."
+			"children": []
 		},
 		"dead-code": {
 			"kind": "agent",
 			"title": "Dead code",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Delete only code this pull request adds. Code that already exists on the base branch is a finding, never an edit. Never delete an export `rg` shows another package importing, and never delete a public API surface, a database column, or a migration."
+			"children": []
 		},
 		"file-size": {
 			"kind": "agent",
 			"title": "File size",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Split a file this pull request adds, or a file this pull request grows past the limit. Never split a file the diff does not touch: report it. Never move a symbol another package imports without updating every importer `rg` finds."
+			"children": []
 		},
 		"migrations": {
 			"kind": "agent",
 			"title": "Migrations",
-			"children": [],
-			"action": "fix-when-certain",
-			"fixBoundary": "Change only a migration this pull request adds. A migration that already exists on the base branch may already have run somewhere: report it and change nothing."
-		},
-		"fix-loop": {
-			"kind": "loop",
-			"title": "Fix until clean",
-			"children": [
-				"apply-fixes"
-			],
-			"maxRounds": 2
-		},
-		"apply-fixes": {
-			"kind": "agent",
-			"title": "Apply the fixes",
-			"children": []
-		},
-		"wrap-up": {
-			"kind": "agent",
-			"title": "Wrap up",
 			"children": []
 		}
 	}
