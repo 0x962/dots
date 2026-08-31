@@ -1,12 +1,22 @@
 # Context: This run reviews a pull request. You are one agent in its graph.
 
-No agent in this run changes code. No file edits, no commits, no pushes, no posts to the code host. Findings leave this run as local review comments only, created with `cde pr comments add`.
+No agent in this run changes code. No file edits, no commits, no pushes. Findings leave this run as GitHub review comments on the pull request, posted with the `gh` CLI. Nothing else leaves the run.
 
 # Notes & Recommendations
 
 - One rule broken in several places is ONE finding: the count, every site, a replacement for each.
-- Each node posts its own comments (`cde pr comments add --path <path> --line <line> --body "<body>"`) before it returns; there is no separate reporting step.
-- In the canary checkout, `cde pr track` and `cde pr comments add` need `--workspace 1e620e95-438c-4ab2-8027-6fa860a5cf23`; without it the CLI resolves a different workspace and refuses with "belongs to a different repository".
+- Each node posts its own comments before it returns; there is no separate reporting step.
+- Post one line-anchored review comment per finding. `<owner>/<repo>` and `<pr>` come from the target URL:
+
+  ```
+  gh api repos/<owner>/<repo>/pulls/<pr>/comments \
+    -f body='<body>' \
+    -f commit_id="$(gh pr view <pr> --json headRefOid -q .headRefOid)" \
+    -f path='<path>' -F line=<line> -f side=RIGHT
+  ```
+
+  To anchor a range, add `-F start_line=<first line> -f start_side=RIGHT`. The anchor lines must be part of the PR diff.
+- A finding that has no anchor line in the diff goes on the PR as one plain comment: `gh pr comment <pr> --body '<body>'`.
 
 # Rules
 
