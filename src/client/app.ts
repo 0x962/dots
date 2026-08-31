@@ -80,9 +80,9 @@ async function newGraph(): Promise<void> {
 		doc: {
 			version: 1,
 			name,
-			root: "main",
+			root: "flow",
 			nodes: {
-				main: { kind: "sequence", title: "Main", children: ["work"], x: 30, y: 40 },
+				flow: { kind: "sequence", title: name, children: ["work"], x: 30, y: 40 },
 				work: { kind: "agent", title: "Do the work", children: [], x: 240, y: 40 },
 			},
 		},

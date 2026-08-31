@@ -26,7 +26,7 @@ export function drawInspector(): void {
 	if (!id || !n) {
 		el.innerHTML = `<h3>Briefing</h3>
 		<p class="lede">What the lead reads before the graph: ground rules, the finding format, the voice. Click a node to edit it instead.</p>
-		<div class="fld"><textarea class="inp mono" id="f-briefing" rows="22" spellcheck="false">${esc(bundle.briefing)}</textarea></div>`;
+		<div class="fld"><textarea class="inp mono" id="f-briefing" rows="30" spellcheck="false">${esc(bundle.briefing)}</textarea></div>`;
 		el.querySelector("#f-briefing")?.addEventListener("input", (ev) => {
 			bundle.briefing = (ev.target as HTMLTextAreaElement).value;
 			state.onChange();
@@ -36,6 +36,9 @@ export function drawInspector(): void {
 	const meta = KIND_META[n.kind];
 	const pid = parentOf(id);
 	const isRoot = id === bundle.doc.root;
+	const lede = isRoot
+		? `The root: every run starts here, and its kind is the top-level control flow. ${meta.lede}`
+		: meta.lede;
 	let extra = "";
 	if (n.kind === "budget") {
 		extra = `<div class="fld"><label>Minutes</label><input class="inp" id="f-min" type="number" min="1" value="${n.minutes ?? 10}" style="width:90px"></div>`;
@@ -67,11 +70,11 @@ export function drawInspector(): void {
 						? "Answered DONE: &lt;why&gt; or AGAIN: &lt;what is left&gt; after each round."
 						: "Markdown this node's agent reads. Saved as nodes/" + id + ".md.";
 		md = `<div class="fld"><label>${label}</label><p class="help">${help}</p>
-		<textarea class="inp mono" id="f-md" rows="14" spellcheck="false">${esc(bundle.instructions[id] ?? "")}</textarea></div>`;
+		<textarea class="inp mono" id="f-md" rows="22" spellcheck="false">${esc(bundle.instructions[id] ?? "")}</textarea></div>`;
 	}
 	const siblings = pid ? node(pid)?.children ?? [] : [];
 	const at = siblings.indexOf(id);
-	el.innerHTML = `<h3>${meta.label}</h3><p class="lede">${meta.lede}</p>
+	el.innerHTML = `<h3>${meta.label}${isRoot ? " · root" : ""}</h3><p class="lede">${lede}</p>
 	<div class="fldrow fld">
 		<div class="grow"><label>Name</label><input class="inp" id="f-title" value="${esc(n.title)}"></div>
 	</div>

@@ -77,10 +77,11 @@ export function drawGraph(): void {
 	for (const [id, n] of Object.entries(doc.nodes)) {
 		const extra =
 			n.kind === "budget" ? ` ${n.minutes}m` : n.kind === "loop" ? ` ×${n.maxRounds}` : "";
-		cards += `<div class="gbcard ${state.selection === id ? "sel" : ""} ${!live.has(id) ? "orphan" : ""}" data-id="${id}" data-kind="${n.kind}" style="left:${n.x}px;top:${n.y}px">
-			<div class="hd"><span class="ttl">${esc(n.title)}</span><span class="k">${KIND_META[n.kind].label}${extra}</span></div>
+		const isRoot = id === doc.root;
+		cards += `<div class="gbcard ${state.selection === id ? "sel" : ""} ${!live.has(id) && !isRoot ? "orphan" : ""}" data-id="${id}" data-kind="${n.kind}" style="left:${n.x}px;top:${n.y}px">
+			<div class="hd"><span class="kdot"></span><span class="ttl">${esc(n.title)}</span>${isRoot ? '<span class="k">root</span>' : ""}<span class="k">${KIND_META[n.kind].label}${extra}</span></div>
 			<div class="idl">${id}</div>
-			${id !== doc.root ? '<span class="gbport in"></span>' : ""}<span class="gbport out"></span></div>`;
+			${!isRoot ? '<span class="gbport in"></span>' : ""}<span class="gbport out"></span></div>`;
 	}
 	els.cards().innerHTML = cards;
 }
@@ -95,7 +96,7 @@ function canvasPoint(ev: PointerEvent): { x: number; y: number } {
 
 type Mode =
 	| { type: "pan"; sx: number; sy: number; vx: number; vy: number }
-	| { type: "node"; id: string; dx: number; dy: number; moved: boolean }
+	| { type: "node"; id: string; dx: number; dy: number; sx: number; sy: number; moved: boolean; el: HTMLElement }
 	| { type: "edge"; fromId: string }
 	| { type: "add"; id: string };
 
@@ -120,7 +121,7 @@ export function initCanvas(): void {
 			const n = node(id);
 			if (!n) return;
 			const p = canvasPoint(ev);
-			mode = { type: "node", id, dx: p.x - (n.x ?? 0), dy: p.y - (n.y ?? 0), moved: false };
+			mode = { type: "node", id, dx: p.x - (n.x ?? 0), dy: p.y - (n.y ?? 0), sx: ev.clientX, sy: ev.clientY, moved: false, el: card };
 		} else {
 			mode = { type: "pan", sx: ev.clientX, sy: ev.clientY, vx: state.view.x, vy: state.view.y };
 			canvas.classList.add("panning");
@@ -139,9 +140,14 @@ export function initCanvas(): void {
 			if (!n) return;
 			const p = canvasPoint(ev);
 			if (mode.type === "node") {
+				// A still click selects; only real movement drags. Without the
+				// threshold, one pixel of jitter turned every click into a drag
+				// and editing felt like it needed a double-click.
+				if (!mode.moved && Math.hypot(ev.clientX - mode.sx, ev.clientY - mode.sy) < 4) return;
+				mode.moved = true;
+				mode.el.classList.add("dragging");
 				n.x = p.x - mode.dx;
 				n.y = p.y - mode.dy;
-				mode.moved = true;
 			} else {
 				n.x = p.x - CW / 2;
 				n.y = p.y - CH / 2;
@@ -165,6 +171,7 @@ export function initCanvas(): void {
 			if (card) reparent(mode.fromId, card.dataset.id as string);
 			state.onChange();
 		} else if (mode.type === "node") {
+			mode.el.classList.remove("dragging");
 			if (!mode.moved) state.selection = mode.id;
 			state.onChange();
 		} else if (mode.type === "add") {
@@ -205,7 +212,8 @@ export function initCanvas(): void {
 		const item = document.createElement("div");
 		item.className = "palitem";
 		item.dataset.kind = kind;
-		item.textContent = KIND_META[kind].label;
+		item.dataset.kind = kind;
+		item.innerHTML = `<span class="kdot"></span>${KIND_META[kind].label}`;
 		palette.insertBefore(item, palette.querySelector(".hint"));
 	}
 	palette.addEventListener("pointerdown", (ev) => {
