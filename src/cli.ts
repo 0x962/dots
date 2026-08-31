@@ -16,6 +16,9 @@ function usage(): never {
   dots show <graph> <nodeId> [--run <runId>] [--prompt] [--reply]
   dots retry <graph> <nodeId> [--run <runId>] [--cwd <dir>]
   dots debug <graph> <nodeId> [--run <runId>]   resume the node's agent session
+  dots ask <graph> <nodeId> "<question>" [--run <runId>]   one question, answered
+      from the node agent's own session; nodes get this too, so later agents
+      can question earlier ones instead of guessing
 
 The agent command comes from DOTS_AGENT_CMD (default: claude -p
 --dangerously-skip-permissions); each node's prompt arrives on stdin.`);
@@ -28,6 +31,10 @@ function flags(argv: string[]): { pos: string[]; opt: Record<string, string>; va
 	const vars: Record<string, string> = {};
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
+		if (a === "--") {
+			pos.push(...argv.slice(i + 1));
+			break;
+		}
 		if (a === "--var") {
 			const [k, ...v] = (argv[++i] ?? "").split("=");
 			vars[k] = v.join("=");
@@ -38,13 +45,18 @@ function flags(argv: string[]): { pos: string[]; opt: Record<string, string>; va
 	return { pos, opt, vars };
 }
 
-function opts(opt: Record<string, string>, vars: Record<string, string>, target: string) {
+function askCommandFor(runId: string): string {
+	return `bun ${import.meta.path} ask ${graphName} --run ${runId} --`;
+}
+
+function opts(opt: Record<string, string>, vars: Record<string, string>, target: string, runId?: string) {
 	return {
 		target,
 		vars,
 		agentCmd: defaultAgentCmd(),
 		cwd: opt.cwd ?? process.cwd(),
 		nodeTimeoutMinutes: Number(process.env.DOTS_NODE_TIMEOUT_MIN ?? 30),
+		askCommand: runId ? askCommandFor(runId) : undefined,
 		onEvent: (line: string) => console.log(`  ${line}`),
 	};
 }
@@ -68,7 +80,7 @@ if (cmd === "run") {
 	run.vars = vars;
 	await saveRun(run);
 	console.log(`${run.runId} · ${run.nodes.length} nodes · target: ${opt.target}`);
-	const done = await executeRun(bundle, run, opts(opt, vars, opt.target));
+	const done = await executeRun(bundle, run, opts(opt, vars, opt.target, run.runId));
 	console.log(`${done.status}${done.note ? ` · ${done.note}` : ""}`);
 	process.exit(done.status === "failed" ? 1 : 0);
 } else if (cmd === "resume") {
@@ -78,7 +90,7 @@ if (cmd === "run") {
 		process.exit(1);
 	}
 	const done = await executeRun(bundle, run, {
-		...opts(opt, { ...(run.vars ?? {}), ...vars }, run.target),
+		...opts(opt, { ...(run.vars ?? {}), ...vars }, run.target, run.runId),
 		cwd: opt.cwd ?? run.cwd ?? process.cwd(),
 	});
 	console.log(`${done.status}`);
@@ -102,6 +114,45 @@ if (cmd === "run") {
 	rn.finishedAt = new Date().toISOString();
 	await saveRun(run);
 	console.log(`${nodeId} ${rn.note} · resume with: dots resume ${graphName}`);
+} else if (cmd === "ask") {
+	// `--` separates the node id and question when this command is composed
+	// into a node prompt; positionals after it land in pos as usual.
+	const nodeId = pos[1];
+	const question = pos.slice(2).join(" ");
+	if (!nodeId || !question.trim()) usage();
+	const run = opt.run ? await loadRun(graphName, opt.run) : await latestRun(graphName);
+	if (!run) {
+		console.error("no runs");
+		process.exit(1);
+	}
+	const rn = run.nodes.find((n) => n.id === nodeId);
+	if (!rn?.sessionId) {
+		console.error(`${nodeId} has no agent session to ask (status: ${rn?.status ?? "missing"}).`);
+		process.exit(1);
+	}
+	const cmdline = (process.env.DOTS_ASK_CMD ?? "claude -p --output-format text --resume {SESSION}")
+		.replace("{SESSION}", rn.sessionId)
+		.split(/\s+/);
+	const proc = Bun.spawn({
+		cmd: cmdline,
+		cwd: run.cwd ?? process.cwd(),
+		stdin: new TextEncoder().encode(question),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [answer, err, code] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	if (code !== 0) {
+		console.error(`ask failed: ${err.trim().split("\n").pop() ?? ""}`);
+		process.exit(1);
+	}
+	const { saveNodeFile, readNodeFile: readAsk } = await import("./core/runstore");
+	const log = await readAsk(run, `${nodeId}.asks.txt`);
+	await saveNodeFile(run, `${nodeId}.asks.txt`, `${log}Q: ${question}\nA: ${answer.trim()}\n\n`);
+	console.log(answer.trim());
 } else if (cmd === "show" || cmd === "retry" || cmd === "debug") {
 	const nodeId = pos[1];
 	if (!nodeId) usage();
@@ -132,7 +183,7 @@ if (cmd === "run") {
 			console.log(`\nfiles: runs/${run.runId}.d/${nodeId}.{prompt.txt,input.txt,txt}`);
 		}
 	} else if (cmd === "retry") {
-		const done = await retryNode(bundle, run, nodeId, opts(opt, vars, run.target));
+		const done = await retryNode(bundle, run, nodeId, opts(opt, vars, run.target, run.runId));
 		console.log(`${nodeId} → ${done.status}${done.note ? ` · ${done.note}` : ""}`);
 	} else {
 		if (!rn.sessionId) {

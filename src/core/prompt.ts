@@ -26,10 +26,15 @@ export function composePrompt(args: {
 	input: string;
 	target: string;
 	vars: Record<string, string>;
+	/** Shell command prefix for questioning an earlier node's agent. */
+	askCommand?: string;
 }): string {
-	const { bundle, id, node, input, target, vars } = args;
+	const { bundle, id, node, input, target, vars, askCommand } = args;
 	const all = { TARGET: target, ...vars };
 	const contract = RETURN_CONTRACT[node.kind] ?? AGENT_CONTRACT;
+	const ask = askCommand
+		? `\nEvery earlier node's agent is still reachable. To ask one a question (why it decided something, what exactly it saw), run:\n  ${askCommand} <node-id> "<your question>"\nIt answers from that agent's own session. Ask instead of guessing about earlier work.`
+		: "";
 	return [
 		substitute(bundle.briefing, all).trim(),
 		"---",
@@ -40,7 +45,7 @@ export function composePrompt(args: {
 		input.trim() || "(none)",
 		"",
 		"Your instructions:",
-		substitute(bundle.instructions[id] ?? "", all).trim(),
+		substitute(bundle.instructions[id] ?? "", all).trim() + ask,
 		"---",
 		contract,
 	].join("\n");

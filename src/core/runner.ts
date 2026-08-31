@@ -16,6 +16,8 @@ export interface RunnerOptions {
 	cwd: string;
 	/** Kills a single node's agent after this many minutes. */
 	nodeTimeoutMinutes: number;
+	/** Shell command prefix nodes use to question earlier agents. */
+	askCommand?: string;
 	onEvent?: (line: string) => void;
 }
 
@@ -252,7 +254,7 @@ async function runNode(
 	switch (gn.kind) {
 		case "agent": {
 			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
-			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars });
+			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand });
 			const res = await spawnAgent(ctx, id, below, prompt);
 			if (!res.ok) return finish("failed", { note: res.detail, ...res.meta }, "");
 			const parsed = parseReply(res.stdout);
@@ -268,7 +270,7 @@ async function runNode(
 		}
 		case "gate": {
 			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
-			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars });
+			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand });
 			const res = await spawnAgent(ctx, id, below, prompt);
 			res.meta.sessionId && (rn.sessionId = res.meta.sessionId);
 			res.meta.costUsd !== undefined && (rn.costUsd = res.meta.costUsd);
@@ -337,7 +339,7 @@ async function runNode(
 				if (statuses.includes("waiting")) return finish("waiting", {}, roundOut);
 				if (settle(statuses) === "failed") return finish("failed", { note: `round ${round} failed` }, roundOut);
 				output = roundOut;
-				const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input: output, target: ctx.run.target, vars: ctx.opts.vars });
+				const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input: output, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand });
 				const res = await spawnAgent(ctx, id, below, prompt);
 				if (!res.ok) return finish("failed", { note: res.detail }, output);
 				const parsed = parseReply(res.stdout);
@@ -384,7 +386,7 @@ export async function retryNode(
 	};
 	const input = await readNodeFile(run, `${nodeId}.input.txt`);
 	await mark(ctx, nodeId, { status: "running", startedAt: new Date().toISOString(), note: undefined, count: undefined });
-	const prompt = composePrompt({ bundle, id: nodeId, node: gn, input, target: run.target, vars: opts.vars });
+	const prompt = composePrompt({ bundle, id: nodeId, node: gn, input, target: run.target, vars: opts.vars, askCommand: opts.askCommand });
 	const res = await spawnAgent(ctx, nodeId, [nodeId], prompt);
 	const done = new Date().toISOString();
 	if (!res.ok) {

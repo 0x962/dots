@@ -21,7 +21,10 @@ a tree of nodes on a canvas, store it as plain files, run it, and watch it.
   and reply (`--prompt` / `--reply` for the raw files), `dots retry` re-runs
   one node with its recorded input and the graph's current instructions
   (edit `nodes/<id>.md`, retry, read), and `dots debug` resumes the node's
-  actual claude session to ask it why.
+  actual claude session to ask it why. `dots ask <graph> <node> "<question>"`
+  asks one question non-interactively and logs the answer beside the run;
+  every node's prompt carries the same command, so a later agent questions
+  an earlier one instead of guessing about its work.
 - **Run view** (http://localhost:4517/runs): the live board. A metro graph
   of the run with status-lit lanes, a stat strip (nodes, found, fixed,
   cost, elapsed), approval cards for parked human nodes (Approve / Request
