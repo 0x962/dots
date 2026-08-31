@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { graphsRoot } from "./store";
 import type { GraphRun } from "./types";
@@ -23,9 +23,15 @@ export async function listRuns(graphName: string): Promise<string[]> {
 }
 
 export async function loadRun(graphName: string, runId: string): Promise<GraphRun> {
-	return JSON.parse(
+	const run = JSON.parse(
 		await readFile(join(runsDir(graphName), `${runId}.json`), "utf8"),
 	) as GraphRun;
+	// Runs written before findings left the framework carry an "items"
+	// status; it reads as a plain success now.
+	for (const n of run.nodes) {
+		if ((n.status as string) === "items") n.status = "ok";
+	}
+	return run;
 }
 
 export async function latestRun(graphName: string): Promise<GraphRun | null> {
@@ -68,4 +74,15 @@ export async function readNodeFile(
 	} catch {
 		return "";
 	}
+}
+
+/** Grows `<node>.stream.txt` while the agent talks; the run view tails it. */
+export async function appendNodeFile(
+	run: GraphRun,
+	name: string,
+	text: string,
+): Promise<void> {
+	const dir = join(runsDir(run.graphName), `${run.runId}.d`);
+	await mkdir(dir, { recursive: true });
+	await appendFile(join(dir, name), text, "utf8");
 }

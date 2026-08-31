@@ -106,30 +106,42 @@ describe("runner", () => {
 		expect(r.status).toBe("failed");
 	});
 
-	it("prunes a gate's subtree on NO and feeds focus on YES", async () => {
+	it("runs a gate's YES branch or its NO branch and skips the other", async () => {
 		const b = await graph(
 			{
-				root: { kind: "parallel", children: ["g1", "g2"] },
-				g1: { kind: "gate", children: ["x"] },
+				root: { kind: "parallel", children: ["g1", "g2", "g3"] },
+				g1: { kind: "gate", children: ["x"], elseChildren: ["z"] },
 				x: { kind: "agent" },
+				z: { kind: "agent" },
 				g2: { kind: "gate", children: ["y"] },
 				y: { kind: "agent" },
+				g3: { kind: "gate", children: ["w"] },
+				w: { kind: "agent" },
 			},
 			"root",
 		);
 		stub({
-			g1: { reply: "thinking...\nNO: nothing here" },
-			g2: { reply: "YES: look at the-focus-token" },
-			y: { expect: "the-focus-token" },
+			g1: { reply: "thinking...\nNO" },
+			g2: { reply: "YES" },
+			g3: { reply: "NO: not touched" },
 		});
 		const r = await run(b);
-		expect(status(r, "g1")).toBe("skipped");
+		// g1 answers NO: the YES branch is skipped, the NO branch runs.
+		expect(status(r, "g1")).toBe("ok");
+		expect(note(r, "g1")).toBe("NO");
 		expect(status(r, "x")).toBe("skipped");
-		expect(note(r, "x")).toContain("gate said no");
-		expect(r.nodes.find((n) => n.id === "y")?.output).toContain("SAW");
+		expect(note(r, "x")).toContain("answered NO");
+		expect(status(r, "z")).toBe("ok");
+		// g2 answers YES: its branch runs.
+		expect(status(r, "y")).toBe("ok");
+		// g3 answers NO with no NO branch: a plain skip, the gate itself is ok.
+		expect(status(r, "g3")).toBe("ok");
+		expect(note(r, "g3")).toBe("NO: not touched");
+		expect(status(r, "w")).toBe("skipped");
+		expect(r.status).toBe("done");
 	});
 
-	it("counts findings as items and honors SKIP", async () => {
+	it("honors SKIP from an agent's reply", async () => {
 		const b = await graph(
 			{
 				root: { kind: "parallel", children: ["a", "b"] },
@@ -139,13 +151,13 @@ describe("runner", () => {
 			"root",
 		);
 		stub({
-			a: { reply: "FINDING\nnode: a\n\nFINDING\nnode: a" },
+			a: { reply: "OUTPUT nothing remarkable" },
 			b: { reply: "SKIP: no such files in the diff" },
 		});
 		const r = await run(b);
-		expect(status(r, "a")).toBe("items");
-		expect(r.nodes.find((n) => n.id === "a")?.count).toBe(2);
+		expect(status(r, "a")).toBe("ok");
 		expect(status(r, "b")).toBe("skipped");
+		expect(note(r, "b")).toContain("no such files");
 		expect(r.status).toBe("done");
 	});
 

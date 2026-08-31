@@ -60,6 +60,50 @@ export async function loadGraph(name: string): Promise<GraphBundle> {
 	return { doc, briefing, instructions };
 }
 
+const STARTER_BRIEFING = `You are the lead of this run. The briefing is what every node's agent reads before its own instructions: ground rules, the format findings use, the voice.
+
+The target of the run is {TARGET}.
+`;
+
+function starterBundle(name: string): GraphBundle {
+	return {
+		doc: {
+			version: 1,
+			name,
+			root: "flow",
+			nodes: {
+				flow: { kind: "sequence", title: "Flow", children: ["first-step"] },
+				"first-step": { kind: "agent", title: "First step", children: [] },
+			},
+		},
+		briefing: STARTER_BRIEFING,
+		instructions: {
+			"first-step": "Runs when: always.\n\nDescribe the work this agent does and what its OUTPUT should carry.",
+		},
+	};
+}
+
+/** A new graph folder: a starter skeleton, or a copy of `from`. */
+export async function createGraph(name: string, from?: string): Promise<void> {
+	assertGraphName(name);
+	if ((await listGraphs()).includes(name)) {
+		throw new Error(`"${name}" already exists.`);
+	}
+	if (from) {
+		const bundle = await loadGraph(from);
+		bundle.doc.name = name;
+		await saveGraph(name, bundle);
+		return;
+	}
+	await saveGraph(name, starterBundle(name));
+}
+
+/** Removes the whole graph folder, runs and transcripts included. */
+export async function deleteGraph(name: string): Promise<void> {
+	assertGraphName(name);
+	await rm(join(graphsRoot(), name), { recursive: true, force: true });
+}
+
 /**
  * Writes the whole folder from the bundle: graph.json, briefing.md, and one
  * nodes/<id>.md per instruction-carrying node. A markdown file for a node

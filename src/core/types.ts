@@ -3,11 +3,11 @@
  * (a pull request, a codebase, any job). Four controllers shape the run and
  * three kinds do the touching:
  *
- * - `agent` does work: it runs once, read-only, and returns an output plus
- *   zero or more findings.
- * - `gate` is an agent whose whole contract is a verdict. YES runs its
- *   subtree and the focus text feeds the children; NO marks the subtree
- *   skipped with the reason.
+ * - `agent` does work: it runs once and returns an output for the next
+ *   node. Anything it reports (review comments, say) it delivers itself.
+ * - `gate` is an if/else. Its agent answers YES or NO; YES runs `children`,
+ *   NO runs `elseChildren`, and the branch not taken is marked skipped. An
+ *   empty branch is a plain skip.
  * - `parallel` starts every child at the same time. A child's failure never
  *   stops its siblings.
  * - `sequence` runs children in order and passes each output to the next. A
@@ -34,17 +34,15 @@ export type NodeKind =
 	| "loop"
 	| "human";
 
-/** What the lead may do with an agent node's findings. */
-export type NodeAction = "fix" | "fix-when-certain" | "report";
-
 export interface GraphNode {
 	kind: NodeKind;
 	title: string;
-	/** Child node ids, in run order. Only containers carry children. */
+	/** Child node ids, in run order. For a gate, the YES branch. */
 	children: string[];
-	action?: NodeAction;
-	/** The edits the lead must never make from this node's findings. */
-	fixBoundary?: string;
+	/** gate: the NO branch, run when the gate answers NO. */
+	elseChildren?: string[];
+	/** The claude model this node's agent runs on (`--model`); unset = the CLI default. */
+	model?: string;
 	/** budget: the time box in minutes. */
 	minutes?: number;
 	/** loop: the round cap. */
@@ -52,6 +50,11 @@ export interface GraphNode {
 	/** Canvas position, editor-owned. */
 	x?: number;
 	y?: number;
+}
+
+/** Both branches of a node, in run order. Non-gates have only `children`. */
+export function allChildren(node: GraphNode): string[] {
+	return node.elseChildren ? [...node.children, ...node.elseChildren] : node.children;
 }
 
 export interface GraphDoc {
@@ -86,7 +89,6 @@ export type RunNodeStatus =
 	| "pending"
 	| "running"
 	| "ok"
-	| "items"
 	| "failed"
 	| "skipped"
 	| "waiting";
@@ -99,11 +101,9 @@ export interface RunNode {
 	parentId: string | null;
 	kind: NodeKind;
 	title: string;
+	/** Set when the parent is a gate and this node sits on its NO branch. */
+	branch?: "no";
 	status: RunNodeStatus;
-	/** Findings returned. */
-	count?: number;
-	/** Findings the lead applied. */
-	fixed?: number;
 	/** One line for the board: a gate's verdict, a skip reason, an ask. */
 	note?: string;
 	/** The node's returned output; feeds later nodes and resumes. */

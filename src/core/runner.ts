@@ -1,11 +1,14 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { composePrompt, parseReply } from "./prompt";
-import { makeRunId, readNodeFile, saveNodeFile, saveRun } from "./runstore";
+import { appendNodeFile, makeRunId, readNodeFile, saveNodeFile, saveRun } from "./runstore";
 import type {
 	GraphBundle,
 	GraphRun,
 	RunNode,
 	RunNodeStatus,
 } from "./types";
+import { allChildren } from "./types";
 
 export interface RunnerOptions {
 	target: string;
@@ -21,10 +24,36 @@ export interface RunnerOptions {
 	onEvent?: (line: string) => void;
 }
 
+/**
+ * A cwd typed by a person may start with `~`; the shell is not there to
+ * expand it, and posix_spawn reports a missing working directory as a
+ * confusing ENOENT on the executable.
+ */
+export function expandHome(p: string): string;
+export function expandHome(p: string | undefined): string | undefined;
+export function expandHome(p: string | undefined): string | undefined {
+	if (!p) return p;
+	if (p === "~") return homedir();
+	return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+}
+
 export function defaultAgentCmd(): string[] {
 	const fromEnv = process.env.DOTS_AGENT_CMD;
 	if (fromEnv) return fromEnv.split(/\s+/);
-	return ["claude", "-p", "--dangerously-skip-permissions", "--output-format", "json"];
+	// stream-json out emits one JSON line per event as the agent works, which
+	// is what lets the run view tail a node while it is still thinking.
+	// stream-json in keeps stdin open, so time-budget notices can reach a
+	// running agent as follow-up user messages.
+	return [
+		"claude",
+		"-p",
+		"--dangerously-skip-permissions",
+		"--input-format",
+		"stream-json",
+		"--output-format",
+		"stream-json",
+		"--verbose",
+	];
 }
 
 /** Everything one run's execution carries between nodes. */
@@ -38,9 +67,8 @@ interface Ctx {
 }
 
 const RANK: Record<RunNodeStatus, number> = {
-	failed: 6,
-	waiting: 5,
-	items: 4,
+	failed: 5,
+	waiting: 4,
 	running: 3,
 	pending: 2,
 	ok: 1,
@@ -65,11 +93,12 @@ export function buildRun(
 ): GraphRun {
 	const startedAt = new Date().toISOString();
 	const nodes: RunNode[] = [];
-	const walk = (id: string, parentId: string | null) => {
+	const walk = (id: string, parentId: string | null, branch?: "no") => {
 		const n = bundle.doc.nodes[id];
 		if (!n) return;
-		nodes.push({ id, parentId, kind: n.kind, title: n.title, status: "pending" });
+		nodes.push({ id, parentId, ...(branch ? { branch } : {}), kind: n.kind, title: n.title, status: "pending" });
 		for (const c of n.children) walk(c, id);
+		for (const c of n.elseChildren ?? []) walk(c, id, "no");
 	};
 	walk(bundle.doc.root, null);
 	return {
@@ -100,13 +129,26 @@ async function mark(ctx: Ctx, id: string, patch: Partial<RunNode>): Promise<void
 function descendants(ctx: Ctx, id: string): string[] {
 	const out: string[] = [];
 	const walk = (nid: string) => {
-		for (const c of ctx.bundle.doc.nodes[nid]?.children ?? []) {
+		const n = ctx.bundle.doc.nodes[nid];
+		if (!n) return;
+		for (const c of allChildren(n)) {
 			out.push(c);
 			walk(c);
 		}
 	};
 	walk(id);
 	return out;
+}
+
+/** Marks every unfinished node under each of `roots` as skipped. */
+async function skipBranch(ctx: Ctx, roots: string[], note: string): Promise<void> {
+	for (const r of roots) {
+		const rn = ctx.byId.get(r);
+		if (rn && (rn.status === "pending" || rn.status === "running")) {
+			await mark(ctx, r, { status: "skipped", note });
+		}
+		await skipSubtree(ctx, r, note);
+	}
 }
 
 async function skipSubtree(ctx: Ctx, id: string, note: string): Promise<void> {
@@ -124,11 +166,9 @@ interface AgentMeta {
 }
 
 /**
- * With the default agent command, stdout is claude's JSON envelope: the
- * reply lives in `.result` and the session id in `.session_id`, which is
- * what makes `dots debug` able to resume the node's session. Any other
- * agent command that prints plain text still works: a reply that does not
- * parse as that envelope is taken whole.
+ * Fallback for an agent that does not speak stream-json: a single claude
+ * JSON envelope still unwraps (`.result`, `.session_id`), and plain text is
+ * taken whole.
  */
 function unwrapReply(stdout: string): { text: string; meta: AgentMeta } {
 	try {
@@ -149,16 +189,45 @@ function unwrapReply(stdout: string): { text: string; meta: AgentMeta } {
 	return { text: stdout, meta: {} };
 }
 
+function summarizeToolInput(input: unknown): string {
+	const s = JSON.stringify(input) ?? "";
+	return s.length > 120 ? `${s.slice(0, 120)}…` : s;
+}
+
+/** The nearest enclosing budget, threaded down from the budget node. */
+export interface Timebox {
+	/** Epoch ms at which the budget expires. */
+	deadline: number;
+	title: string;
+}
+
+function promptBudget(b?: Timebox): { title: string; minutesLeft: number } | undefined {
+	return b
+		? { title: b.title, minutesLeft: Math.max(1, Math.round((b.deadline - Date.now()) / 60_000)) }
+		: undefined;
+}
+
+function userMessage(text: string): string {
+	return `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } })}\n`;
+}
+
 async function spawnAgent(
 	ctx: Ctx,
 	id: string,
 	ancestry: string[],
 	prompt: string,
+	deadline?: number,
+	model?: string,
 ): Promise<{ ok: boolean; stdout: string; detail: string; meta: AgentMeta }> {
+	// With stream-json input, stdin stays open after the prompt, so budget
+	// notices can reach the running agent. An agent command without that
+	// flag (a stub, plain claude json mode) gets the prompt and EOF at once.
+	const streaming = ctx.opts.agentCmd.includes("--input-format");
+	const cmd = model ? [...ctx.opts.agentCmd, "--model", model] : ctx.opts.agentCmd;
 	const proc = Bun.spawn({
-		cmd: ctx.opts.agentCmd,
+		cmd,
 		cwd: ctx.opts.cwd,
-		stdin: new TextEncoder().encode(prompt),
+		stdin: streaming ? "pipe" : new TextEncoder().encode(prompt),
 		stdout: "pipe",
 		stderr: "pipe",
 		env: {
@@ -168,21 +237,125 @@ async function spawnAgent(
 			DOTS_RUN_ID: ctx.run.runId,
 		},
 	});
+	const sink = streaming ? (proc.stdin as Bun.FileSink) : null;
+	let inputOpen = false;
+	if (sink) {
+		inputOpen = true;
+		sink.write(userMessage(prompt));
+		void sink.flush();
+	}
+	const closeInput = () => {
+		if (!sink || !inputOpen) return;
+		inputOpen = false;
+		try {
+			void sink.end();
+		} catch {
+			// the process is already gone
+		}
+	};
+	const warnTimers: Array<ReturnType<typeof setTimeout>> = [];
+	if (sink && deadline) {
+		for (const m of [5, 3, 1]) {
+			const delay = deadline - m * 60_000 - Date.now();
+			if (delay > 5_000) {
+				warnTimers.push(
+					setTimeout(() => {
+						if (!inputOpen) return;
+						try {
+							sink.write(
+								userMessage(
+									`Time budget notice: about ${m} minute${m === 1 ? "" : "s"} left for your group. Wrap up and return your result now.`,
+								),
+							);
+							void sink.flush();
+							void appendNodeFile(ctx.run, `${id}.stream.txt`, `\n⏳ ${m} minute${m === 1 ? "" : "s"} left in the time budget\n`);
+						} catch {
+							// the process is already gone
+						}
+					}, delay),
+				);
+			}
+		}
+	}
 	await saveNodeFile(ctx.run, `${id}.prompt.txt`, prompt);
+	await saveNodeFile(ctx.run, `${id}.stream.txt`, "");
 	const entry = { id, ancestry, proc };
 	ctx.live.push(entry);
 	const timer = setTimeout(
 		() => proc.kill(),
 		ctx.opts.nodeTimeoutMinutes * 60_000,
 	);
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
+	const stderrDone = new Response(proc.stderr).text();
+
+	// stdout is consumed as it arrives. stream-json events become a readable
+	// tail in `<node>.stream.txt`; the `result` event carries the reply. An
+	// agent that prints plain text streams as-is and is unwrapped at the end.
+	let raw = "";
+	let lineBuf = "";
+	const final: { text?: string; sessionId?: string; costUsd?: number } = {};
+	const decoder = new TextDecoder();
+	const onLine = (line: string): string => {
+		const trimmed = line.trim();
+		if (!trimmed) return "";
+		try {
+			const ev = JSON.parse(trimmed) as {
+				type?: string;
+				session_id?: string;
+				result?: string;
+				total_cost_usd?: number;
+				message?: { content?: Array<{ type: string; text?: string; name?: string; input?: unknown }> };
+			};
+			if (ev && typeof ev.type === "string") {
+				if (ev.session_id) final.sessionId = ev.session_id;
+				if (ev.type === "assistant") {
+					let out = "";
+					for (const block of ev.message?.content ?? []) {
+						if (block.type === "text" && block.text) out += `${block.text}\n`;
+						else if (block.type === "tool_use") out += `⏺ ${block.name} ${summarizeToolInput(block.input)}\n`;
+					}
+					return out;
+				}
+				if (ev.type === "result") {
+					if (typeof ev.result === "string") final.text = ev.result;
+					if (typeof ev.total_cost_usd === "number") final.costUsd = ev.total_cost_usd;
+					// The reply is in: no more notices, and EOF lets claude exit.
+					for (const t of warnTimers) clearTimeout(t);
+					closeInput();
+				}
+				// system, user, and tool-result events are noise for the tail
+				return "";
+			}
+		} catch {
+			// plain-text agent
+		}
+		return `${line}\n`;
+	};
+	for await (const chunk of proc.stdout) {
+		const text = decoder.decode(chunk, { stream: true });
+		raw += text;
+		lineBuf += text;
+		let batch = "";
+		let nl: number;
+		while ((nl = lineBuf.indexOf("\n")) >= 0) {
+			batch += onLine(lineBuf.slice(0, nl));
+			lineBuf = lineBuf.slice(nl + 1);
+		}
+		if (batch) await appendNodeFile(ctx.run, `${id}.stream.txt`, batch);
+	}
+	const tail = onLine(lineBuf);
+	if (tail) await appendNodeFile(ctx.run, `${id}.stream.txt`, tail);
+	for (const t of warnTimers) clearTimeout(t);
+	closeInput();
+
+	const [stderr, code] = await Promise.all([stderrDone, proc.exited]);
 	clearTimeout(timer);
 	ctx.live.splice(ctx.live.indexOf(entry), 1);
-	const { text, meta } = unwrapReply(stdout);
+	const fallback = unwrapReply(raw);
+	const text = final.text ?? fallback.text;
+	const meta: AgentMeta = {
+		sessionId: final.sessionId ?? fallback.meta.sessionId,
+		costUsd: final.costUsd ?? fallback.meta.costUsd,
+	};
 	await saveNodeFile(ctx.run, `${id}.txt`, text + (stderr ? `\n--- stderr ---\n${stderr}` : ""));
 	if (code !== 0) {
 		return {
@@ -202,6 +375,7 @@ async function runChildrenSequence(
 	ids: string[],
 	input: string,
 	ancestry: string[],
+	budget?: Timebox,
 ): Promise<{ statuses: RunNodeStatus[]; output: string }> {
 	const statuses: RunNodeStatus[] = [];
 	let carried = input;
@@ -215,7 +389,7 @@ async function runChildrenSequence(
 			statuses.push("skipped");
 			continue;
 		}
-		const res = await runNode(ctx, id, carried, ancestry);
+		const res = await runNode(ctx, id, carried, ancestry, budget);
 		statuses.push(res.status);
 		if (res.status === "failed") halted = ctx.byId.get(id)?.title ?? id;
 		if (res.status === "waiting") break; // the rest stays pending for the resume
@@ -229,12 +403,13 @@ async function runNode(
 	id: string,
 	input: string,
 	ancestry: string[],
+	budget?: Timebox,
 ): Promise<NodeResult> {
 	const gn = ctx.bundle.doc.nodes[id];
 	const rn = ctx.byId.get(id);
 	if (!gn || !rn) return { status: "failed", output: "" };
 	// A resume replays what already settled and re-tries what failed.
-	if (rn.status === "ok" || rn.status === "items" || rn.status === "skipped") {
+	if (rn.status === "ok" || rn.status === "skipped") {
 		return { status: rn.status, output: rn.output ?? "" };
 	}
 	if (rn.status === "waiting" && gn.kind === "human") {
@@ -254,13 +429,12 @@ async function runNode(
 	switch (gn.kind) {
 		case "agent": {
 			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
-			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand });
-			const res = await spawnAgent(ctx, id, below, prompt);
+			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand, budget: promptBudget(budget) });
+			const res = await spawnAgent(ctx, id, below, prompt, budget?.deadline, gn.model);
 			if (!res.ok) return finish("failed", { note: res.detail, ...res.meta }, "");
 			const parsed = parseReply(res.stdout);
 			if (parsed.skipped) return finish("skipped", { note: parsed.note, ...res.meta }, "");
-			const status = parsed.findings > 0 ? "items" : "ok";
-			return finish(status, { count: parsed.findings || undefined, output: parsed.output, ...res.meta }, parsed.output);
+			return finish("ok", { output: parsed.output, ...res.meta }, parsed.output);
 		}
 		case "human": {
 			// Parks with the content to judge in `output`; approve or reject
@@ -269,36 +443,37 @@ async function runNode(
 			return { status: "waiting", output: "" };
 		}
 		case "gate": {
+			const noKids = (gn.elseChildren ?? []).filter((c) => ctx.bundle.doc.nodes[c]);
 			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
-			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand });
-			const res = await spawnAgent(ctx, id, below, prompt);
+			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand, budget: promptBudget(budget) });
+			const res = await spawnAgent(ctx, id, below, prompt, budget?.deadline, gn.model);
 			res.meta.sessionId && (rn.sessionId = res.meta.sessionId);
 			res.meta.costUsd !== undefined && (rn.costUsd = res.meta.costUsd);
 			if (!res.ok) {
-				await skipSubtree(ctx, id, "the gate failed");
+				await skipBranch(ctx, [...kids, ...noKids], "the gate failed");
 				return finish("failed", { note: res.detail }, "");
 			}
 			const parsed = parseReply(res.stdout);
-			if (parsed.verdict === "no") {
-				await mark(ctx, id, { note: `NO: ${parsed.note}`, output: parsed.output });
-				await skipSubtree(ctx, id, `gate said no: ${parsed.note}`);
-				return finish("skipped", {}, "");
-			}
-			if (parsed.verdict !== "yes") {
-				await skipSubtree(ctx, id, "the gate gave no verdict");
+			if (parsed.verdict !== "yes" && parsed.verdict !== "no") {
+				await skipBranch(ctx, [...kids, ...noKids], "the gate gave no verdict");
 				return finish("failed", { note: "no YES or NO in the reply" }, "");
 			}
-			await mark(ctx, id, { note: `YES: ${parsed.note}`, output: parsed.output });
-			const childInput = `${input.trim()}\n\nGate focus: ${parsed.output}`.trim();
-			const results = await Promise.all(kids.map((c) => runNode(ctx, c, childInput, below)));
+			const word = parsed.verdict.toUpperCase();
+			await mark(ctx, id, { note: parsed.note ? `${word}: ${parsed.note}` : word, output: parsed.output });
+			const taken = parsed.verdict === "yes" ? kids : noKids;
+			const skipped = parsed.verdict === "yes" ? noKids : kids;
+			await skipBranch(ctx, skipped, `the gate answered ${word}`);
+			// An empty branch is a plain skip: the flow moves on with its input.
+			if (taken.length === 0) return finish("ok", {}, input);
+			const results = await Promise.all(taken.map((c) => runNode(ctx, c, input, below, budget)));
 			return finish(settle(results.map((r) => r.status)), {}, results.map((r) => r.output).filter(Boolean).join("\n\n"));
 		}
 		case "parallel": {
-			const results = await Promise.all(kids.map((c) => runNode(ctx, c, input, below)));
+			const results = await Promise.all(kids.map((c) => runNode(ctx, c, input, below, budget)));
 			return finish(settle(results.map((r) => r.status)), {}, results.map((r) => r.output).filter(Boolean).join("\n\n"));
 		}
 		case "sequence": {
-			const { statuses, output } = await runChildrenSequence(ctx, kids, input, below);
+			const { statuses, output } = await runChildrenSequence(ctx, kids, input, below, budget);
 			const open = kids.some((c) => ctx.byId.get(c)?.status === "pending");
 			const status = open && statuses.includes("waiting") ? "waiting" : settle(statuses);
 			return finish(status === "running" ? "failed" : status, {}, output);
@@ -312,7 +487,9 @@ async function runNode(
 					if (entry.ancestry.includes(id)) entry.proc.kill();
 				}
 			}, ms);
-			const results = await Promise.all(kids.map((c) => runNode(ctx, c, input, below)));
+			// Everything inside learns the box and gets countdown notices.
+			const childBudget: Timebox = { deadline: Date.now() + ms, title: gn.title };
+			const results = await Promise.all(kids.map((c) => runNode(ctx, c, input, below, childBudget)));
 			clearTimeout(timer);
 			if (tripped) {
 				for (const d of descendants(ctx, id)) {
@@ -335,12 +512,12 @@ async function runNode(
 						await mark(ctx, d, { status: "pending", note: `round ${round}`, startedAt: undefined, finishedAt: undefined });
 					}
 				}
-				const { statuses, output: roundOut } = await runChildrenSequence(ctx, kids, output, below);
+				const { statuses, output: roundOut } = await runChildrenSequence(ctx, kids, output, below, budget);
 				if (statuses.includes("waiting")) return finish("waiting", {}, roundOut);
 				if (settle(statuses) === "failed") return finish("failed", { note: `round ${round} failed` }, roundOut);
 				output = roundOut;
-				const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input: output, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand });
-				const res = await spawnAgent(ctx, id, below, prompt);
+				const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input: output, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand, budget: promptBudget(budget) });
+				const res = await spawnAgent(ctx, id, below, prompt, budget?.deadline, gn.model);
 				if (!res.ok) return finish("failed", { note: res.detail }, output);
 				const parsed = parseReply(res.stdout);
 				if (parsed.verdict === "done") {
@@ -359,10 +536,36 @@ async function runNode(
 }
 
 /**
- * Re-runs one agent or gate node in place, with its recorded input and the
- * graph's CURRENT instructions: the loop for debugging a node is edit
- * `nodes/<id>.md`, `dots retry`, read the reply. Children are not re-run and
- * downstream results stand; a full re-review is a new run.
+ * A one-node scratch run for trying a single node by hand. Its id starts
+ * with `test-`, so `listRuns` never shows it in run history, but the run
+ * file and its `runs/<runId>.d/` transcripts land on disk like any other
+ * run: `dots debug --run <id>` can still resume the agent behind a test.
+ */
+export function buildTestRun(
+	bundle: GraphBundle,
+	graphName: string,
+	nodeId: string,
+	target: string,
+): GraphRun {
+	const gn = bundle.doc.nodes[nodeId];
+	if (!gn) throw new Error(`no node "${nodeId}" in this graph`);
+	const startedAt = new Date().toISOString();
+	return {
+		runId: `test-${startedAt.replace(/[:.]/g, "-")}`,
+		graphName,
+		target,
+		startedAt,
+		finishedAt: null,
+		status: "running",
+		nodes: [{ id: nodeId, parentId: null, kind: gn.kind, title: gn.title, status: "pending" }],
+	};
+}
+
+/**
+ * Re-runs one agent, gate, or loop-exit node in place, with its recorded
+ * input and the graph's CURRENT instructions: the loop for debugging a node
+ * is edit `nodes/<id>.md`, `dots retry`, read the reply. Children are not
+ * re-run and downstream results stand; a full re-review is a new run.
  */
 export async function retryNode(
 	bundle: GraphBundle,
@@ -373,8 +576,8 @@ export async function retryNode(
 	const gn = bundle.doc.nodes[nodeId];
 	const rn = run.nodes.find((n) => n.id === nodeId);
 	if (!gn || !rn) throw new Error(`no node "${nodeId}" in this run`);
-	if (gn.kind !== "agent" && gn.kind !== "gate") {
-		throw new Error(`retry runs agent and gate nodes; ${nodeId} is a ${gn.kind}`);
+	if (gn.kind !== "agent" && gn.kind !== "gate" && gn.kind !== "loop") {
+		throw new Error(`retry runs agent, gate, and loop nodes; ${nodeId} is a ${gn.kind}`);
 	}
 	const ctx: Ctx = {
 		bundle,
@@ -385,9 +588,9 @@ export async function retryNode(
 		saving: Promise.resolve(),
 	};
 	const input = await readNodeFile(run, `${nodeId}.input.txt`);
-	await mark(ctx, nodeId, { status: "running", startedAt: new Date().toISOString(), note: undefined, count: undefined });
+	await mark(ctx, nodeId, { status: "running", startedAt: new Date().toISOString(), note: undefined });
 	const prompt = composePrompt({ bundle, id: nodeId, node: gn, input, target: run.target, vars: opts.vars, askCommand: opts.askCommand });
-	const res = await spawnAgent(ctx, nodeId, [nodeId], prompt);
+	const res = await spawnAgent(ctx, nodeId, [nodeId], prompt, undefined, gn.model);
 	const done = new Date().toISOString();
 	if (!res.ok) {
 		await mark(ctx, nodeId, { status: "failed", note: res.detail, finishedAt: done, ...res.meta });
@@ -397,7 +600,16 @@ export async function retryNode(
 			const verdictNote = parsed.verdict ? `${parsed.verdict.toUpperCase()}: ${parsed.note}` : "no verdict";
 			await mark(ctx, nodeId, {
 				status: parsed.verdict === "no" ? "skipped" : parsed.verdict === "yes" ? "ok" : "failed",
-				note: `retried · ${verdictNote}`,
+				note: verdictNote,
+				output: parsed.output,
+				finishedAt: done,
+				...res.meta,
+			});
+		} else if (gn.kind === "loop") {
+			const answered = parsed.verdict === "done" || parsed.verdict === "again";
+			await mark(ctx, nodeId, {
+				status: answered ? "ok" : "failed",
+				note: answered ? `${parsed.verdict!.toUpperCase()}: ${parsed.note}` : "no DONE or AGAIN in the reply",
 				output: parsed.output,
 				finishedAt: done,
 				...res.meta,
@@ -406,8 +618,7 @@ export async function retryNode(
 			await mark(ctx, nodeId, { status: "skipped", note: parsed.note, finishedAt: done, ...res.meta });
 		} else {
 			await mark(ctx, nodeId, {
-				status: parsed.findings > 0 ? "items" : "ok",
-				count: parsed.findings || undefined,
+				status: "ok",
 				output: parsed.output,
 				finishedAt: done,
 				...res.meta,

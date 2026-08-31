@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { buildRun, defaultAgentCmd, executeRun, retryNode } from "./core/runner";
+import { buildRun, defaultAgentCmd, executeRun, expandHome, retryNode } from "./core/runner";
 import { latestRun, listRuns, loadRun, readNodeFile, saveRun } from "./core/runstore";
-import { loadGraph } from "./core/store";
+import { graphsRoot, loadGraph } from "./core/store";
 import { validateGraph } from "./core/validate";
 
 function usage(): never {
@@ -46,7 +46,9 @@ function flags(argv: string[]): { pos: string[]; opt: Record<string, string>; va
 }
 
 function askCommandFor(runId: string): string {
-	return `bun ${import.meta.path} ask ${graphName} --run ${runId} --`;
+	// Agents run this from the repo under review; the graphs folder must not
+	// resolve relative to their cwd.
+	return `DOTS_GRAPHS_DIR="${graphsRoot()}" ${process.execPath} ${import.meta.path} ask ${graphName} --run ${runId} --`;
 }
 
 function opts(opt: Record<string, string>, vars: Record<string, string>, target: string, runId?: string) {
@@ -54,7 +56,7 @@ function opts(opt: Record<string, string>, vars: Record<string, string>, target:
 		target,
 		vars,
 		agentCmd: defaultAgentCmd(),
-		cwd: opt.cwd ?? process.cwd(),
+		cwd: expandHome(opt.cwd) ?? process.cwd(),
 		nodeTimeoutMinutes: Number(process.env.DOTS_NODE_TIMEOUT_MIN ?? 30),
 		askCommand: runId ? askCommandFor(runId) : undefined,
 		onEvent: (line: string) => console.log(`  ${line}`),
@@ -91,7 +93,7 @@ if (cmd === "run") {
 	}
 	const done = await executeRun(bundle, run, {
 		...opts(opt, { ...(run.vars ?? {}), ...vars }, run.target, run.runId),
-		cwd: opt.cwd ?? run.cwd ?? process.cwd(),
+		cwd: expandHome(opt.cwd ?? run.cwd) ?? process.cwd(),
 	});
 	console.log(`${done.status}`);
 	process.exit(done.status === "failed" ? 1 : 0);
@@ -135,7 +137,7 @@ if (cmd === "run") {
 		.split(/\s+/);
 	const proc = Bun.spawn({
 		cmd: cmdline,
-		cwd: run.cwd ?? process.cwd(),
+		cwd: expandHome(run.cwd) ?? process.cwd(),
 		stdin: new TextEncoder().encode(question),
 		stdout: "pipe",
 		stderr: "pipe",
@@ -177,7 +179,7 @@ if (cmd === "run") {
 					? `${((Date.parse(rn.finishedAt) - Date.parse(rn.startedAt)) / 1000).toFixed(1)}s`
 					: "-";
 			console.log(`${nodeId} [${rn.kind}] · ${rn.status}${rn.note ? ` · ${rn.note}` : ""}`);
-			console.log(`run ${run.runId} · ${dur}${rn.costUsd !== undefined ? ` · $${rn.costUsd.toFixed(4)}` : ""}${rn.sessionId ? ` · session ${rn.sessionId}` : ""}${rn.count ? ` · findings ${rn.count}` : ""}`);
+			console.log(`run ${run.runId} · ${dur}${rn.costUsd !== undefined ? ` · $${rn.costUsd.toFixed(4)}` : ""}${rn.sessionId ? ` · session ${rn.sessionId}` : ""}`);
 			const reply = await readNodeFile(run, `${nodeId}.txt`);
 			if (reply) console.log(`\n--- reply (dots show ${graphName} ${nodeId} --reply for all) ---\n${reply.slice(0, 2000)}`);
 			console.log(`\nfiles: runs/${run.runId}.d/${nodeId}.{prompt.txt,input.txt,txt}`);
@@ -191,14 +193,13 @@ if (cmd === "run") {
 			process.exit(1);
 		}
 		console.log(`resuming session ${rn.sessionId} · exit that chat to come back`);
-		const proc = Bun.spawn({ cmd: ["claude", "--resume", rn.sessionId], stdio: ["inherit", "inherit", "inherit"], cwd: opt.cwd ?? process.cwd() });
+		const proc = Bun.spawn({ cmd: ["claude", "--resume", rn.sessionId], stdio: ["inherit", "inherit", "inherit"], cwd: expandHome(opt.cwd ?? run.cwd) ?? process.cwd() });
 		process.exit(await proc.exited);
 	}
 } else if (cmd === "runs") {
 	for (const id of await listRuns(graphName)) {
 		const run = await loadRun(graphName, id);
-		const found = run.nodes.reduce((t, n) => t + (n.count ?? 0), 0);
-		console.log(`${id}  ${run.status.padEnd(7)}  found:${found}  target: ${run.target}`);
+		console.log(`${id}  ${run.status.padEnd(7)}  target: ${run.target}`);
 	}
 } else if (cmd === "plan") {
 	const doc = bundle.doc;

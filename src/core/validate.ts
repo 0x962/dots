@@ -1,9 +1,8 @@
 import type { GraphBundle, GraphNode } from "./types";
-import { carriesInstructions, isContainer } from "./types";
+import { allChildren, carriesInstructions, isContainer } from "./types";
 
 const ID_SHAPE = /^[a-z0-9][a-z0-9-]*$/;
 const KINDS = ["agent", "gate", "parallel", "sequence", "budget", "loop", "human"];
-const ACTIONS = ["fix", "fix-when-certain", "report"];
 
 /**
  * Checks a bundle before it is written to disk. It comes from the editor or
@@ -35,7 +34,7 @@ export function validateGraph(bundle: GraphBundle): string[] {
 			errors.push(`${where}: children must be a list.`);
 			continue;
 		}
-		for (const child of node.children) {
+		for (const child of allChildren(node)) {
 			if (!doc.nodes[child]) {
 				errors.push(`${where}: the child "${child}" is not in the nodes map.`);
 			}
@@ -43,14 +42,14 @@ export function validateGraph(bundle: GraphBundle): string[] {
 		if (!isContainer(node.kind) && node.children.length > 0) {
 			errors.push(`${where}: a ${node.kind} runs no children.`);
 		}
+		if (node.elseChildren && node.kind !== "gate") {
+			errors.push(`${where}: only a gate has a NO branch.`);
+		}
 		if (isContainer(node.kind) && node.kind !== "gate" && node.children.length === 0) {
 			errors.push(`${where}: a ${node.kind} needs at least one child.`);
 		}
-		if (node.kind === "gate" && node.children.length === 0) {
-			errors.push(`${where}: a gate needs at least one child to run on YES.`);
-		}
-		if (node.action && !ACTIONS.includes(node.action)) {
-			errors.push(`${where}: the action must be fix, fix-when-certain, or report.`);
+		if (node.kind === "gate" && allChildren(node).length === 0) {
+			errors.push(`${where}: a gate needs at least one node on YES or NO.`);
 		}
 		if (node.kind === "budget" && !((node.minutes ?? 0) > 0)) {
 			errors.push(`${where}: the budget needs minutes above zero.`);
@@ -67,7 +66,7 @@ export function validateGraph(bundle: GraphBundle): string[] {
 	// One parent per node, and no cycles: walk from the root, each node once.
 	const parents = new Map<string, string>();
 	for (const [id, node] of Object.entries(doc.nodes)) {
-		for (const child of node.children) {
+		for (const child of allChildren(node)) {
 			if (parents.has(child)) {
 				errors.push(
 					`"${child}" has two parents: ${parents.get(child)} and ${id}. A node runs under one parent.`,
@@ -85,7 +84,9 @@ export function validateGraph(bundle: GraphBundle): string[] {
 			}
 			if (seen.has(id)) return;
 			seen.add(id);
-			for (const child of doc.nodes[id]?.children ?? []) {
+			const node = doc.nodes[id];
+			if (!node) return;
+			for (const child of allChildren(node)) {
 				if (doc.nodes[child]) walk(child, [...trail, id]);
 			}
 		};

@@ -34,7 +34,7 @@ describe("validateGraph", () => {
 		b.doc.nodes.g.children = [];
 		const msg = validateGraph(b).join(" ");
 		expect(msg).toContain("runs no children");
-		expect(msg).toContain("gate needs at least one child");
+		expect(msg).toContain("gate needs at least one node on YES or NO");
 	});
 	it("rejects a cycle and a double parent", () => {
 		const b = bundle();
