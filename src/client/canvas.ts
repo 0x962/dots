@@ -1,4 +1,5 @@
 import type { NodeKind } from "../core/types";
+import { KIND_ICON } from "./icons";
 import { addNode, KIND_META, node, reachable, reparent, state } from "./state";
 
 const CW = 172;
@@ -50,15 +51,36 @@ export function drawGraph(): void {
 		return;
 	}
 	const live = reachable();
+	let cards = "";
+	for (const [id, n] of Object.entries(doc.nodes)) {
+		const extra =
+			n.kind === "budget" ? ` ${n.minutes}m` : n.kind === "loop" ? ` ×${n.maxRounds}` : "";
+		const isRoot = id === doc.root;
+		cards += `<div class="gbcard ${state.selection === id ? "sel" : ""} ${!live.has(id) && !isRoot ? "orphan" : ""}" data-id="${id}" data-kind="${n.kind}" style="left:${n.x}px;top:${n.y}px">
+			<div class="hd"><span class="kic">${KIND_ICON[n.kind]}</span><span class="ttl">${esc(n.title)}</span>${isRoot ? '<span class="k">root</span>' : ""}<span class="k">${KIND_META[n.kind].label}${extra}</span></div>
+			<div class="idl">${id}</div>
+			${!isRoot ? '<span class="gbport in"></span>' : ""}<span class="gbport out"></span></div>`;
+	}
+	els.cards().innerHTML = cards;
+
+	// Edges attach to the ports, and the ports sit at half the card's real
+	// rendered height, which varies with its rows. Measure, then draw.
+	const size = new Map<string, { w: number; h: number }>();
+	els.cards()
+		.querySelectorAll<HTMLElement>(".gbcard")
+		.forEach((el) => {
+			size.set(el.dataset.id as string, { w: el.offsetWidth, h: el.offsetHeight });
+		});
+	const mid = (id: string) => (size.get(id)?.h ?? CH) / 2;
 	let paths = "";
 	for (const [id, n] of Object.entries(doc.nodes)) {
 		n.children.forEach((cid, i) => {
 			const k = doc.nodes[cid];
 			if (!k) return;
-			const x1 = (n.x ?? 0) + CW;
-			const y1 = (n.y ?? 0) + CH / 2;
+			const x1 = (n.x ?? 0) + (size.get(id)?.w ?? CW);
+			const y1 = (n.y ?? 0) + mid(id);
 			const x2 = k.x ?? 0;
-			const y2 = (k.y ?? 0) + CH / 2;
+			const y2 = (k.y ?? 0) + mid(cid);
 			const dx = Math.max(40, (x2 - x1) / 2);
 			paths += `<path class="gbedge" d="M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}"/>`;
 			if (n.kind === "sequence" || n.kind === "loop") {
@@ -72,18 +94,6 @@ export function drawGraph(): void {
 		paths += `<path class="gbedge tmp" d="M ${tmpEdge.x1} ${tmpEdge.y1} L ${tmpEdge.x2} ${tmpEdge.y2}"/>`;
 	}
 	els.edges().innerHTML = paths;
-
-	let cards = "";
-	for (const [id, n] of Object.entries(doc.nodes)) {
-		const extra =
-			n.kind === "budget" ? ` ${n.minutes}m` : n.kind === "loop" ? ` ×${n.maxRounds}` : "";
-		const isRoot = id === doc.root;
-		cards += `<div class="gbcard ${state.selection === id ? "sel" : ""} ${!live.has(id) && !isRoot ? "orphan" : ""}" data-id="${id}" data-kind="${n.kind}" style="left:${n.x}px;top:${n.y}px">
-			<div class="hd"><span class="kdot"></span><span class="ttl">${esc(n.title)}</span>${isRoot ? '<span class="k">root</span>' : ""}<span class="k">${KIND_META[n.kind].label}${extra}</span></div>
-			<div class="idl">${id}</div>
-			${!isRoot ? '<span class="gbport in"></span>' : ""}<span class="gbport out"></span></div>`;
-	}
-	els.cards().innerHTML = cards;
 }
 
 function canvasPoint(ev: PointerEvent): { x: number; y: number } {
@@ -114,7 +124,8 @@ export function initCanvas(): void {
 			if (!n) return;
 			mode = { type: "edge", fromId: id };
 			const p = canvasPoint(ev);
-			tmpEdge = { x1: (n.x ?? 0) + CW, y1: (n.y ?? 0) + CH / 2, x2: p.x, y2: p.y };
+			const cardEl = card as HTMLElement;
+			tmpEdge = { x1: (n.x ?? 0) + cardEl.offsetWidth, y1: (n.y ?? 0) + cardEl.offsetHeight / 2, x2: p.x, y2: p.y };
 			drawGraph();
 		} else if (card) {
 			const id = card.dataset.id as string;
@@ -213,7 +224,7 @@ export function initCanvas(): void {
 		item.className = "palitem";
 		item.dataset.kind = kind;
 		item.dataset.kind = kind;
-		item.innerHTML = `<span class="kdot"></span>${KIND_META[kind].label}`;
+		item.innerHTML = `<span class="kic">${KIND_ICON[kind]}</span>${KIND_META[kind].label}`;
 		palette.insertBefore(item, palette.querySelector(".hint"));
 	}
 	palette.addEventListener("pointerdown", (ev) => {

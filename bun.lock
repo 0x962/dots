@@ -1,0 +1,15 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "dots",
+      "dependencies": {
+        "lucide-static": "^1.38.0",
+      },
+    },
+  },
+  "packages": {
+    "lucide-static": ["lucide-static@1.38.0", "", {}, "sha512-/pRaHJceXrQyAMzWfwhWPMwZeiZEIejZ+Ko226AqI52QbLVgowyGAp7OzZIaQEf7XB+LuRGWqUGqTfu3LJ0CQQ=="],
+  }
+}
