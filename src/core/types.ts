@@ -112,6 +112,9 @@ export interface RunNode {
 	round?: number;
 	startedAt?: string;
 	finishedAt?: string;
+	/** The agent session behind this node; `dots debug` resumes it. */
+	sessionId?: string;
+	costUsd?: number;
 }
 
 /** One run of one graph, stored at `<graph folder>/runs/<runId>.json`. */

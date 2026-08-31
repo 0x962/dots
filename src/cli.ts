@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { buildRun, defaultAgentCmd, executeRun } from "./core/runner";
-import { latestRun, listRuns, loadRun, saveRun } from "./core/runstore";
+import { buildRun, defaultAgentCmd, executeRun, retryNode } from "./core/runner";
+import { latestRun, listRuns, loadRun, readNodeFile, saveRun } from "./core/runstore";
 import { loadGraph } from "./core/store";
 import { validateGraph } from "./core/validate";
 
@@ -13,6 +13,9 @@ function usage(): never {
   dots reject <graph> <nodeId> [--note <text>] [--run <runId>]
   dots runs <graph>
   dots plan <graph>
+  dots show <graph> <nodeId> [--run <runId>] [--prompt] [--reply]
+  dots retry <graph> <nodeId> [--run <runId>] [--cwd <dir>]
+  dots debug <graph> <nodeId> [--run <runId>]   resume the node's agent session
 
 The agent command comes from DOTS_AGENT_CMD (default: claude -p
 --dangerously-skip-permissions); each node's prompt arrives on stdin.`);
@@ -94,6 +97,47 @@ if (cmd === "run") {
 	rn.finishedAt = new Date().toISOString();
 	await saveRun(run);
 	console.log(`${nodeId} ${rn.note} · resume with: dots resume ${graphName}`);
+} else if (cmd === "show" || cmd === "retry" || cmd === "debug") {
+	const nodeId = pos[1];
+	if (!nodeId) usage();
+	const run = opt.run ? await loadRun(graphName, opt.run) : await latestRun(graphName);
+	if (!run) {
+		console.error("no runs");
+		process.exit(1);
+	}
+	const rn = run.nodes.find((n) => n.id === nodeId);
+	if (!rn) {
+		console.error(`no node "${nodeId}" in ${run.runId}`);
+		process.exit(1);
+	}
+	if (cmd === "show") {
+		if (opt.prompt !== undefined || "prompt" in opt) {
+			console.log(await readNodeFile(run, `${nodeId}.prompt.txt`));
+		} else if ("reply" in opt) {
+			console.log(await readNodeFile(run, `${nodeId}.txt`));
+		} else {
+			const dur =
+				rn.startedAt && rn.finishedAt
+					? `${((Date.parse(rn.finishedAt) - Date.parse(rn.startedAt)) / 1000).toFixed(1)}s`
+					: "-";
+			console.log(`${nodeId} [${rn.kind}] · ${rn.status}${rn.note ? ` · ${rn.note}` : ""}`);
+			console.log(`run ${run.runId} · ${dur}${rn.costUsd !== undefined ? ` · $${rn.costUsd.toFixed(4)}` : ""}${rn.sessionId ? ` · session ${rn.sessionId}` : ""}${rn.count ? ` · findings ${rn.count}` : ""}`);
+			const reply = await readNodeFile(run, `${nodeId}.txt`);
+			if (reply) console.log(`\n--- reply (dots show ${graphName} ${nodeId} --reply for all) ---\n${reply.slice(0, 2000)}`);
+			console.log(`\nfiles: runs/${run.runId}.d/${nodeId}.{prompt.txt,input.txt,txt}`);
+		}
+	} else if (cmd === "retry") {
+		const done = await retryNode(bundle, run, nodeId, opts(opt, vars, run.target));
+		console.log(`${nodeId} → ${done.status}${done.note ? ` · ${done.note}` : ""}`);
+	} else {
+		if (!rn.sessionId) {
+			console.error(`${nodeId} recorded no agent session (a stub agent, or the node never spawned).`);
+			process.exit(1);
+		}
+		console.log(`resuming session ${rn.sessionId} · exit that chat to come back`);
+		const proc = Bun.spawn({ cmd: ["claude", "--resume", rn.sessionId], stdio: ["inherit", "inherit", "inherit"], cwd: opt.cwd ?? process.cwd() });
+		process.exit(await proc.exited);
+	}
 } else if (cmd === "runs") {
 	for (const id of await listRuns(graphName)) {
 		const run = await loadRun(graphName, id);

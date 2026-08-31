@@ -1,5 +1,5 @@
 import { composePrompt, parseReply } from "./prompt";
-import { makeRunId, saveRun, saveTranscript } from "./runstore";
+import { makeRunId, readNodeFile, saveNodeFile, saveRun } from "./runstore";
 import type {
 	GraphBundle,
 	GraphRun,
@@ -22,7 +22,7 @@ export interface RunnerOptions {
 export function defaultAgentCmd(): string[] {
 	const fromEnv = process.env.DOTS_AGENT_CMD;
 	if (fromEnv) return fromEnv.split(/\s+/);
-	return ["claude", "-p", "--dangerously-skip-permissions"];
+	return ["claude", "-p", "--dangerously-skip-permissions", "--output-format", "json"];
 }
 
 /** Everything one run's execution carries between nodes. */
@@ -116,12 +116,43 @@ async function skipSubtree(ctx: Ctx, id: string, note: string): Promise<void> {
 	}
 }
 
+interface AgentMeta {
+	sessionId?: string;
+	costUsd?: number;
+}
+
+/**
+ * With the default agent command, stdout is claude's JSON envelope: the
+ * reply lives in `.result` and the session id in `.session_id`, which is
+ * what makes `dots debug` able to resume the node's session. Any other
+ * agent command that prints plain text still works: a reply that does not
+ * parse as that envelope is taken whole.
+ */
+function unwrapReply(stdout: string): { text: string; meta: AgentMeta } {
+	try {
+		const parsed = JSON.parse(stdout) as {
+			result?: string;
+			session_id?: string;
+			total_cost_usd?: number;
+		};
+		if (typeof parsed.result === "string") {
+			return {
+				text: parsed.result,
+				meta: { sessionId: parsed.session_id, costUsd: parsed.total_cost_usd },
+			};
+		}
+	} catch {
+		// Plain-text agent.
+	}
+	return { text: stdout, meta: {} };
+}
+
 async function spawnAgent(
 	ctx: Ctx,
 	id: string,
 	ancestry: string[],
 	prompt: string,
-): Promise<{ ok: boolean; stdout: string; detail: string }> {
+): Promise<{ ok: boolean; stdout: string; detail: string; meta: AgentMeta }> {
 	const proc = Bun.spawn({
 		cmd: ctx.opts.agentCmd,
 		cwd: ctx.opts.cwd,
@@ -135,6 +166,7 @@ async function spawnAgent(
 			DOTS_RUN_ID: ctx.run.runId,
 		},
 	});
+	await saveNodeFile(ctx.run, `${id}.prompt.txt`, prompt);
 	const entry = { id, ancestry, proc };
 	ctx.live.push(entry);
 	const timer = setTimeout(
@@ -148,15 +180,17 @@ async function spawnAgent(
 	]);
 	clearTimeout(timer);
 	ctx.live.splice(ctx.live.indexOf(entry), 1);
-	await saveTranscript(ctx.run, id, stdout + (stderr ? `\n--- stderr ---\n${stderr}` : ""));
+	const { text, meta } = unwrapReply(stdout);
+	await saveNodeFile(ctx.run, `${id}.txt`, text + (stderr ? `\n--- stderr ---\n${stderr}` : ""));
 	if (code !== 0) {
 		return {
 			ok: false,
-			stdout,
+			stdout: text,
 			detail: `agent exited ${code}: ${stderr.trim().split("\n").pop() ?? ""}`.trim(),
+			meta,
 		};
 	}
-	return { ok: true, stdout, detail: "" };
+	return { ok: true, stdout: text, detail: "", meta };
 }
 
 type NodeResult = { status: RunNodeStatus; output: string };
@@ -217,13 +251,14 @@ async function runNode(
 
 	switch (gn.kind) {
 		case "agent": {
+			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
 			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars });
 			const res = await spawnAgent(ctx, id, below, prompt);
-			if (!res.ok) return finish("failed", { note: res.detail }, "");
+			if (!res.ok) return finish("failed", { note: res.detail, ...res.meta }, "");
 			const parsed = parseReply(res.stdout);
-			if (parsed.skipped) return finish("skipped", { note: parsed.note }, "");
+			if (parsed.skipped) return finish("skipped", { note: parsed.note, ...res.meta }, "");
 			const status = parsed.findings > 0 ? "items" : "ok";
-			return finish(status, { count: parsed.findings || undefined, output: parsed.output }, parsed.output);
+			return finish(status, { count: parsed.findings || undefined, output: parsed.output, ...res.meta }, parsed.output);
 		}
 		case "human": {
 			// Parks with the content to judge in `output`; approve or reject
@@ -232,8 +267,11 @@ async function runNode(
 			return { status: "waiting", output: "" };
 		}
 		case "gate": {
+			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
 			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars });
 			const res = await spawnAgent(ctx, id, below, prompt);
+			res.meta.sessionId && (rn.sessionId = res.meta.sessionId);
+			res.meta.costUsd !== undefined && (rn.costUsd = res.meta.costUsd);
 			if (!res.ok) {
 				await skipSubtree(ctx, id, "the gate failed");
 				return finish("failed", { note: res.detail }, "");
@@ -316,6 +354,66 @@ async function runNode(
 			return finish("ok", {}, output);
 		}
 	}
+}
+
+/**
+ * Re-runs one agent or gate node in place, with its recorded input and the
+ * graph's CURRENT instructions: the loop for debugging a node is edit
+ * `nodes/<id>.md`, `dots retry`, read the reply. Children are not re-run and
+ * downstream results stand; a full re-review is a new run.
+ */
+export async function retryNode(
+	bundle: GraphBundle,
+	run: GraphRun,
+	nodeId: string,
+	opts: RunnerOptions,
+): Promise<RunNode> {
+	const gn = bundle.doc.nodes[nodeId];
+	const rn = run.nodes.find((n) => n.id === nodeId);
+	if (!gn || !rn) throw new Error(`no node "${nodeId}" in this run`);
+	if (gn.kind !== "agent" && gn.kind !== "gate") {
+		throw new Error(`retry runs agent and gate nodes; ${nodeId} is a ${gn.kind}`);
+	}
+	const ctx: Ctx = {
+		bundle,
+		run,
+		opts,
+		byId: new Map(run.nodes.map((n) => [n.id, n])),
+		live: [],
+		saving: Promise.resolve(),
+	};
+	const input = await readNodeFile(run, `${nodeId}.input.txt`);
+	await mark(ctx, nodeId, { status: "running", startedAt: new Date().toISOString(), note: undefined, count: undefined });
+	const prompt = composePrompt({ bundle, id: nodeId, node: gn, input, target: run.target, vars: opts.vars });
+	const res = await spawnAgent(ctx, nodeId, [nodeId], prompt);
+	const done = new Date().toISOString();
+	if (!res.ok) {
+		await mark(ctx, nodeId, { status: "failed", note: res.detail, finishedAt: done, ...res.meta });
+	} else {
+		const parsed = parseReply(res.stdout);
+		if (gn.kind === "gate") {
+			const verdictNote = parsed.verdict ? `${parsed.verdict.toUpperCase()}: ${parsed.note}` : "no verdict";
+			await mark(ctx, nodeId, {
+				status: parsed.verdict === "no" ? "skipped" : parsed.verdict === "yes" ? "ok" : "failed",
+				note: `retried · ${verdictNote}`,
+				output: parsed.output,
+				finishedAt: done,
+				...res.meta,
+			});
+		} else if (parsed.skipped) {
+			await mark(ctx, nodeId, { status: "skipped", note: parsed.note, finishedAt: done, ...res.meta });
+		} else {
+			await mark(ctx, nodeId, {
+				status: parsed.findings > 0 ? "items" : "ok",
+				count: parsed.findings || undefined,
+				output: parsed.output,
+				finishedAt: done,
+				...res.meta,
+			});
+		}
+	}
+	await ctx.saving;
+	return rn;
 }
 
 /** Runs (or resumes) a run to its next stop: done, failed, or waiting. */

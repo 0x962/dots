@@ -14,6 +14,14 @@ a tree of nodes on a canvas, store it as plain files, run it, and watch it.
   `runs/<runId>.d/`. `dots approve|reject` answers a parked human node,
   `dots resume` carries a run on, `dots plan` prints the tree, `dots runs`
   lists history. `--var K=V` fills `{K}` in briefing and instructions.
+- **Inspect and debug**: every node leaves `runs/<runId>.d/<node>.prompt.txt`
+  (exactly what its agent was told), `<node>.input.txt` (what it received),
+  and `<node>.txt` (its whole reply); the run file adds timing, cost, and
+  the agent session id. `dots show <graph> <node>` prints a node's verdict
+  and reply (`--prompt` / `--reply` for the raw files), `dots retry` re-runs
+  one node with its recorded input and the graph's current instructions
+  (edit `nodes/<id>.md`, retry, read), and `dots debug` resumes the node's
+  actual claude session to ask it why.
 - **Run view**: planned; the live metro board for a running graph.
 - **Canary DE integration**: planned; the desktop app consumes all three.
 

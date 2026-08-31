@@ -44,13 +44,28 @@ export async function saveRun(run: GraphRun): Promise<void> {
 	await rename(tmp, path);
 }
 
-/** One transcript file per node per run, for debugging a node's whole reply. */
-export async function saveTranscript(
+/**
+ * Per-node debug files live in `runs/<runId>.d/`: `<node>.txt` is the whole
+ * reply, `<node>.prompt.txt` exactly what the agent was told, and
+ * `<node>.input.txt` the raw input `dots retry` recomposes from.
+ */
+export async function saveNodeFile(
 	run: GraphRun,
-	nodeId: string,
+	name: string,
 	text: string,
 ): Promise<void> {
 	const dir = join(runsDir(run.graphName), `${run.runId}.d`);
 	await mkdir(dir, { recursive: true });
-	await writeFile(join(dir, `${nodeId}.txt`), text, "utf8");
+	await writeFile(join(dir, name), text, "utf8");
+}
+
+export async function readNodeFile(
+	run: GraphRun,
+	name: string,
+): Promise<string> {
+	try {
+		return await readFile(join(runsDir(run.graphName), `${run.runId}.d`, name), "utf8");
+	} catch {
+		return "";
+	}
 }
