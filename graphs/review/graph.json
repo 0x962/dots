@@ -115,12 +115,14 @@
 		"code-comments": {
 			"kind": "agent",
 			"title": "Code comments",
-			"children": []
+			"children": [],
+			"model": "claude-opus-5"
 		},
 		"naming": {
 			"kind": "agent",
 			"title": "Naming",
-			"children": []
+			"children": [],
+			"model": "claude-opus-5"
 		},
 		"dead-code": {
 			"kind": "agent",
