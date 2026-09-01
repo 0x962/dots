@@ -148,18 +148,18 @@ export function RunsApp() {
 			</header>
 
 			<div className="main">
-				{!EMBED && (
-					<RunList
-						rows={rows}
-						graph={graph}
-						runId={runId}
-						onPick={(row) => {
-							setGraph(row.graph);
-							setRunId(row.runId);
-							setSelection(null);
-						}}
-					/>
-				)}
+				{/* The embed keeps the rail too: it lists every run of the pinned
+				    target, which is the whole review history of that PR. */}
+				<RunList
+					rows={rows}
+					graph={graph}
+					runId={runId}
+					onPick={(row) => {
+						setGraph(row.graph);
+						setRunId(row.runId);
+						setSelection(null);
+					}}
+				/>
 				<div className="center">
 					{run && verdict && (
 						<div className="runhead">
