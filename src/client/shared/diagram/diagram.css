@@ -273,14 +273,14 @@
 	height: 18px;
 	display: flex;
 	align-items: center;
-	padding: 0 8px;
+	padding: 0 9px;
 	border-radius: 999px;
-	background: color-mix(in srgb, var(--lc) 12%, var(--panel));
-	border: 1px solid color-mix(in srgb, var(--lc) 35%, var(--border));
-	color: var(--lc);
-	font-size: 9px;
-	font-weight: 600;
-	letter-spacing: 0.07em;
+	background: color-mix(in srgb, var(--lc) 24%, var(--panel));
+	border: 1px solid color-mix(in srgb, var(--lc) 55%, var(--border));
+	color: color-mix(in srgb, var(--lc) 45%, white);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
 	z-index: 3;
 }
 /* An empty branch: the flow passes straight through. */
@@ -295,9 +295,9 @@
 	gap: 4px;
 	padding: 0 12px;
 	border-radius: 999px;
-	border: 1px dashed color-mix(in srgb, var(--lc) 25%, var(--border-strong));
+	border: 1px dashed color-mix(in srgb, var(--lc) 30%, var(--border-strong));
 	background: none;
-	color: var(--text-faint);
+	color: var(--text-dim);
 	font-size: 10.5px;
 	font-family: inherit;
 	white-space: nowrap;
@@ -380,7 +380,8 @@ button.lane-skip:hover {
 .n-approve .yes {
 	background: var(--s-ok);
 	border-color: var(--s-ok);
-	color: #fff;
+	color: #08090a;
+	font-weight: 700;
 }
 .n-approve .yes:hover {
 	filter: brightness(1.08);
