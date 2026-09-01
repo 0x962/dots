@@ -241,12 +241,13 @@ export function RunsApp() {
 
 			{dialog && (
 				<RunDialog
-					graph={graph ?? graphs[0] ?? ""}
-					graphs={EMBED ? undefined : graphs}
+					graph={graph ?? localStorage.getItem("dots:last-graph") ?? graphs[0] ?? ""}
+					graphs={graphs}
 					pinTarget={PIN_TARGET || undefined}
 					defaultCwd={PIN_CWD || undefined}
 					onClose={() => setDialog(false)}
 					onStarted={(id, g) => {
+						localStorage.setItem("dots:last-graph", g);
 						setDialog(false);
 						setGraph(g);
 						setRunId(id);
