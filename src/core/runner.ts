@@ -223,7 +223,17 @@ async function spawnAgent(
 	// notices can reach the running agent. An agent command without that
 	// flag (a stub, plain claude json mode) gets the prompt and EOF at once.
 	const streaming = ctx.opts.agentCmd.includes("--input-format");
-	const cmd = model ? [...ctx.opts.agentCmd, "--model", model] : ctx.opts.agentCmd;
+	// A margin comment points back to the session that wrote it. Claude takes
+	// its session id up front, and the same id goes into the environment, so
+	// the margin CLI's $CLAUDE_SESSION_ID default fills the pointer without
+	// the agent doing anything.
+	const sessionId = crypto.randomUUID();
+	const isClaude = ctx.opts.agentCmd[0]?.includes("claude");
+	const cmd = [
+		...ctx.opts.agentCmd,
+		...(isClaude ? ["--session-id", sessionId] : []),
+		...(model ? ["--model", model] : []),
+	];
 	const proc = Bun.spawn({
 		cmd,
 		cwd: ctx.opts.cwd,
@@ -232,6 +242,7 @@ async function spawnAgent(
 		stderr: "pipe",
 		env: {
 			...process.env,
+			CLAUDE_SESSION_ID: sessionId,
 			DOTS_NODE_ID: id,
 			DOTS_GRAPH: ctx.run.graphName,
 			DOTS_RUN_ID: ctx.run.runId,
