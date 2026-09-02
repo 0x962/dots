@@ -22,7 +22,8 @@
 			"children": [
 				"frontend",
 				"backend",
-				"readability"
+				"readability",
+				"claude-code-review"
 			]
 		},
 		"frontend": {
@@ -58,7 +59,8 @@
 				"thin-views-and-models",
 				"service-boundaries",
 				"rest-api",
-				"module-layout"
+				"module-layout",
+				"logging"
 			]
 		},
 		"readability": {
@@ -137,6 +139,16 @@
 		"migrations": {
 			"kind": "agent",
 			"title": "Migrations",
+			"children": []
+		},
+		"logging": {
+			"kind": "agent",
+			"title": "Logging",
+			"children": []
+		},
+		"claude-code-review": {
+			"kind": "agent",
+			"title": "Claude /code-review",
 			"children": []
 		}
 	}

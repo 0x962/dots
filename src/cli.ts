@@ -7,11 +7,14 @@ import { validateGraph } from "./core/validate";
 function usage(): never {
 	console.log(`dots — run agent graphs
 
+  dots start <graph> --target <text> [--var K=V]... [--cwd <dir>]
+      detached run through the server; prints {"runId": ...} at once
+  dots status <graph> [runId] [--json]   run state, per-node; latest when no id
   dots run <graph> --target <text> [--var K=V]... [--cwd <dir>]
   dots resume <graph> [runId] [--cwd <dir>]
   dots approve <graph> <nodeId> [--note <text>] [--run <runId>]
   dots reject <graph> <nodeId> [--note <text>] [--run <runId>]
-  dots runs <graph>
+  dots runs <graph> [--json]
   dots plan <graph>
   dots show <graph> <nodeId> [--run <runId>] [--prompt] [--reply]
   dots retry <graph> <nodeId> [--run <runId>] [--cwd <dir>]
@@ -196,10 +199,82 @@ if (cmd === "run") {
 		const proc = Bun.spawn({ cmd: ["claude", "--resume", rn.sessionId], stdio: ["inherit", "inherit", "inherit"], cwd: expandHome(opt.cwd ?? run.cwd) ?? process.cwd() });
 		process.exit(await proc.exited);
 	}
+} else if (cmd === "start") {
+	const target = opt.target ?? "";
+	if (!target.trim()) usage();
+	const port = Number(process.env.DOTS_PORT ?? 4517);
+	const res = await fetch(`http://localhost:${port}/api/graphs/${graphName}/runs`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ target, cwd: opt.cwd, vars }),
+	}).catch(() => null);
+	if (!res) {
+		console.error(`the dots server does not answer on :${port}; start it (bun dev) or use \`dots run\``);
+		process.exit(1);
+	}
+	const body = (await res.json()) as { runId?: string; error?: string };
+	if (!res.ok || !body.runId) {
+		console.error(body.error ?? `start failed (${res.status})`);
+		process.exit(1);
+	}
+	console.log(
+		JSON.stringify({
+			runId: body.runId,
+			graph: graphName,
+			status: "running",
+			board: `http://dots.localhost/runs`,
+			statusCommand: `dots status ${graphName} ${body.runId}`,
+		}),
+	);
+} else if (cmd === "status") {
+	const run = pos[1] ? await loadRun(graphName, pos[1]) : await latestRun(graphName);
+	if (!run) {
+		console.error("no runs");
+		process.exit(1);
+	}
+	const counts: Record<string, number> = {};
+	for (const n of run.nodes) counts[n.status] = (counts[n.status] ?? 0) + 1;
+	const costUsd = run.nodes.reduce((t, n) => t + (n.costUsd ?? 0), 0);
+	const elapsedSeconds = Math.round(
+		((run.finishedAt ? Date.parse(run.finishedAt) : Date.now()) - Date.parse(run.startedAt)) / 1000,
+	);
+	const summary = {
+		runId: run.runId,
+		graph: graphName,
+		status: run.status,
+		target: run.target,
+		note: run.note ?? null,
+		startedAt: run.startedAt,
+		finishedAt: run.finishedAt,
+		elapsedSeconds,
+		costUsd: Number(costUsd.toFixed(4)),
+		counts,
+		nodes: run.nodes.map((n) => ({ id: n.id, kind: n.kind, status: n.status, note: n.note ?? null })),
+	};
+	if (!process.stdout.isTTY || "json" in opt) {
+		console.log(JSON.stringify(summary, null, 2));
+	} else {
+		console.log(
+			`${run.runId}  ${run.status}  ${elapsedSeconds}s  $${costUsd.toFixed(2)}  target: ${run.target}${run.note ? `\n${run.note}` : ""}`,
+		);
+		for (const n of run.nodes) {
+			console.log(`  ${n.status.padEnd(8)} ${n.id} [${n.kind}]${n.note ? ` · ${n.note}` : ""}`);
+		}
+	}
 } else if (cmd === "runs") {
-	for (const id of await listRuns(graphName)) {
-		const run = await loadRun(graphName, id);
-		console.log(`${id}  ${run.status.padEnd(7)}  target: ${run.target}`);
+	const ids = await listRuns(graphName);
+	if (!process.stdout.isTTY || "json" in opt) {
+		const runs = [];
+		for (const id of ids) {
+			const run = await loadRun(graphName, id);
+			runs.push({ runId: id, status: run.status, target: run.target, startedAt: run.startedAt, finishedAt: run.finishedAt });
+		}
+		console.log(JSON.stringify(runs.reverse(), null, 2));
+	} else {
+		for (const id of ids) {
+			const run = await loadRun(graphName, id);
+			console.log(`${id}  ${run.status.padEnd(7)}  target: ${run.target}`);
+		}
 	}
 } else if (cmd === "plan") {
 	const doc = bundle.doc;

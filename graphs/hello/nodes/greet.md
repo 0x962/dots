@@ -1,1 +1,1 @@
-Reply with exactly one line: OUTPUT: hello from dots to {TARGET}
+Answer the target directly, in plain text, in at most two sentences.
