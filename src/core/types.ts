@@ -25,6 +25,8 @@
  * carries text: instructions for agent, gate, and human nodes, the exit
  * question for loop nodes.
  */
+import type { HarnessId } from "./harness";
+
 export type NodeKind =
 	| "agent"
 	| "gate"
@@ -41,7 +43,16 @@ export interface GraphNode {
 	children: string[];
 	/** gate: the NO branch, run when the gate answers NO. */
 	elseChildren?: string[];
-	/** The claude model this node's agent runs on (`--model`); unset = the CLI default. */
+	/**
+	 * The coding-agent CLI this node's agent runs in; unset takes the graph's
+	 * choice, then the run's.
+	 */
+	harness?: HarnessId;
+	/**
+	 * The model this node's agent runs on, spelled the way its harness spells
+	 * it: a claude alias or id for claude, `provider/model-id` for pi. Unset
+	 * means the harness picks.
+	 */
 	model?: string;
 	/** budget: the time box in minutes. */
 	minutes?: number;
@@ -63,6 +74,8 @@ export interface GraphDoc {
 	name: string;
 	/** Id of the root node. */
 	root: string;
+	/** The harness every node of this graph runs in, unless it names its own. */
+	harness?: HarnessId;
 	nodes: Record<string, GraphNode>;
 }
 
@@ -112,6 +125,8 @@ export interface RunNode {
 	round?: number;
 	startedAt?: string;
 	finishedAt?: string;
+	/** The harness this node ran in; `dots debug` and `dots ask` need it. */
+	harness?: HarnessId;
 	/** The agent session behind this node; `dots debug` resumes it. */
 	sessionId?: string;
 	costUsd?: number;

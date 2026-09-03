@@ -27,9 +27,10 @@ review comments through [margin](https://github.com/0x962/margin).
 ## Requirements
 
 - [Bun](https://bun.sh)
-- An agent CLI. The default command is
-  `claude -p --dangerously-skip-permissions`. Set `DOTS_AGENT_CMD` to use
-  a different one.
+- A coding-agent CLI. dots ships two harnesses: `claude`
+  ([Claude Code](https://claude.ai/code)) and `pi`
+  ([@mariozechner/pi-coding-agent](https://github.com/badlogic/pi-mono)).
+  Install the one you run nodes in. See [Harnesses](#harnesses).
 
 ## Run
 
@@ -38,6 +39,71 @@ review comments through [margin](https://github.com/0x962/margin).
 3. Open `http://localhost:4517` and select or create a graph.
 4. Run a graph: `./dots run hello --target "some input"`.
 5. Watch the run at `http://localhost:4517/runs`.
+
+## Harnesses
+
+A harness is the coding-agent CLI one node's agent runs in. dots spawns one
+process per node, writes the node's prompt to its stdin, and reads the
+reply, the session id, and the cost back off its stdout.
+
+| Harness | CLI | Models |
+|---|---|---|
+| `claude` | `claude` | the Claude models |
+| `pi` | `pi` | Vercel AI Gateway, OpenRouter, and the model providers direct |
+
+Pi is the way to run a node on a model Anthropic does not make. Install it
+with `npm i -g @mariozechner/pi-coding-agent`.
+
+A node's own choice wins, then the graph's, then `--harness` on the run,
+then `DOTS_HARNESS`, then `claude`. Pick a node's harness and model in the
+editor's inspector, or write them into `graph.json`:
+
+```json
+{
+  "harness": "pi",
+  "nodes": {
+    "correctness": {
+      "kind": "agent",
+      "title": "Correctness",
+      "children": [],
+      "harness": "pi",
+      "model": "vercel-ai-gateway/meta/muse-spark-1.1"
+    }
+  }
+}
+```
+
+A model name goes to the harness verbatim, so it is spelled the harness's
+way: a claude alias or id (`opus`, `claude-opus-5`) for claude,
+`<provider>/<model id>` for pi
+(`vercel-ai-gateway/meta/muse-spark-1.1`). Pi also takes a thinking level
+on the end of the name: `vercel-ai-gateway/openai/gpt-5.6-sol:high`.
+
+Two differences to know before you move a node to pi:
+
+- A time budget cannot warn a pi node. Claude reads stdin while it works,
+  so dots sends it "5 minutes left" notices; `pi -p` reads the prompt and
+  closes stdin. A pi node under a budget is still killed on expiry, it just
+  gets no warning first.
+- A pi node's margin comments carry no session pointer. Claude takes its
+  session id up front, so `$CLAUDE_SESSION_ID` is set before the agent
+  runs; pi names its own session and reports it afterwards. The run file
+  records that id either way, so `dots debug` and `dots ask` work on both.
+
+### Vercel AI Gateway
+
+One key reaches every vendor. Get it from
+[vercel.com/dashboard/ai-gateway](https://vercel.com/dashboard/ai-gateway)
+and export it:
+
+```bash
+export AI_GATEWAY_API_KEY=vck_...
+```
+
+Pi ships its model list with each release, so the newest gateway models are
+missing from a pi that is a few weeks old. `~/.pi/agent/models.json` fills
+them in; see [pi's models doc](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md).
+`pi --list-models` prints what a key reaches.
 
 ## Node kinds
 
@@ -73,6 +139,7 @@ through full-folder saves.
 
 ```
 dots run <graph> --target <text>   start a run (--var K=V fills {K})
+                                   --harness claude|pi sets the run default
 dots runs                          list run history
 dots plan <graph>                  print the tree
 dots show <graph> <node>           print a node's verdict and reply

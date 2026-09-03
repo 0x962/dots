@@ -2,10 +2,11 @@ import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import index from "./client/index.html";
 import runsPage from "./client/runs.html";
+import { defaultHarnessId } from "./core/harness";
 import {
 	buildRun,
 	buildTestRun,
-	defaultAgentCmd,
+	agentCmdOverride,
 	expandHome,
 	retryNode,
 	type RunnerOptions,
@@ -78,7 +79,8 @@ function runnerOpts(run: GraphRun, withAsk: boolean): RunnerOptions {
 	return {
 		target: run.target,
 		vars: run.vars ?? {},
-		agentCmd: defaultAgentCmd(),
+		harness: defaultHarnessId(),
+		agentCmd: agentCmdOverride(),
 		cwd: expandHome(run.cwd) ?? process.cwd(),
 		nodeTimeoutMinutes: Number(process.env.DOTS_NODE_TIMEOUT_MIN ?? 30),
 		// Agents run this from run.cwd, so the graphs folder rides along.

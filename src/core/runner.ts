@@ -1,9 +1,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { type HarnessId, defaultHarnessId, harness, isHarnessId } from "./harness";
 import { composePrompt, parseReply } from "./prompt";
-import { appendNodeFile, makeRunId, readNodeFile, saveNodeFile, saveRun } from "./runstore";
+import { appendNodeFile, makeRunId, nodeFilesDir, readNodeFile, saveNodeFile, saveRun } from "./runstore";
 import type {
 	GraphBundle,
+	GraphNode,
 	GraphRun,
 	RunNode,
 	RunNodeStatus,
@@ -13,8 +15,15 @@ import { allChildren } from "./types";
 export interface RunnerOptions {
 	target: string;
 	vars: Record<string, string>;
-	/** The agent command; the node's prompt arrives on stdin. */
-	agentCmd: string[];
+	/** The harness nodes run in when neither the node nor the graph names one. */
+	harness: HarnessId;
+	/**
+	 * Replaces the harness's own command for every node: the test stub, and
+	 * whatever DOTS_AGENT_CMD names. Its output is read the way claude's is,
+	 * so a command that prints plain text has its whole output taken as the
+	 * reply.
+	 */
+	agentCmd?: string[];
 	/** Where agents run, normally the repository under review. */
 	cwd: string;
 	/** Kills a single node's agent after this many minutes. */
@@ -37,23 +46,28 @@ export function expandHome(p: string | undefined): string | undefined {
 	return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
 }
 
-export function defaultAgentCmd(): string[] {
+/**
+ * DOTS_AGENT_CMD replaces the harness command for every node of a run.
+ * Unset means each node runs in its own harness.
+ */
+export function agentCmdOverride(): string[] | undefined {
 	const fromEnv = process.env.DOTS_AGENT_CMD;
-	if (fromEnv) return fromEnv.split(/\s+/);
-	// stream-json out emits one JSON line per event as the agent works, which
-	// is what lets the run view tail a node while it is still thinking.
-	// stream-json in keeps stdin open, so time-budget notices can reach a
-	// running agent as follow-up user messages.
-	return [
-		"claude",
-		"-p",
-		"--dangerously-skip-permissions",
-		"--input-format",
-		"stream-json",
-		"--output-format",
-		"stream-json",
-		"--verbose",
-	];
+	return fromEnv ? fromEnv.split(/\s+/) : undefined;
+}
+
+/**
+ * The harness one node runs in: its own choice, else the graph's, else the
+ * run's. An unknown name in a hand-edited graph.json falls back rather than
+ * failing the node.
+ */
+export function harnessFor(
+	bundle: GraphBundle,
+	node: GraphNode,
+	opts: RunnerOptions,
+): HarnessId {
+	if (isHarnessId(node.harness)) return node.harness;
+	if (isHarnessId(bundle.doc.harness)) return bundle.doc.harness;
+	return isHarnessId(opts.harness) ? opts.harness : defaultHarnessId();
 }
 
 /** Everything one run's execution carries between nodes. */
@@ -161,37 +175,9 @@ async function skipSubtree(ctx: Ctx, id: string, note: string): Promise<void> {
 }
 
 interface AgentMeta {
+	harness: HarnessId;
 	sessionId?: string;
 	costUsd?: number;
-}
-
-/**
- * Fallback for an agent that does not speak stream-json: a single claude
- * JSON envelope still unwraps (`.result`, `.session_id`), and plain text is
- * taken whole.
- */
-function unwrapReply(stdout: string): { text: string; meta: AgentMeta } {
-	try {
-		const parsed = JSON.parse(stdout) as {
-			result?: string;
-			session_id?: string;
-			total_cost_usd?: number;
-		};
-		if (typeof parsed.result === "string") {
-			return {
-				text: parsed.result,
-				meta: { sessionId: parsed.session_id, costUsd: parsed.total_cost_usd },
-			};
-		}
-	} catch {
-		// Plain-text agent.
-	}
-	return { text: stdout, meta: {} };
-}
-
-function summarizeToolInput(input: unknown): string {
-	const s = JSON.stringify(input) ?? "";
-	return s.length > 120 ? `${s.slice(0, 120)}…` : s;
 }
 
 /** The nearest enclosing budget, threaded down from the budget node. */
@@ -207,33 +193,32 @@ function promptBudget(b?: Timebox): { title: string; minutesLeft: number } | und
 		: undefined;
 }
 
-function userMessage(text: string): string {
-	return `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } })}\n`;
-}
-
 async function spawnAgent(
 	ctx: Ctx,
 	id: string,
 	ancestry: string[],
 	prompt: string,
+	node: GraphNode,
 	deadline?: number,
-	model?: string,
 ): Promise<{ ok: boolean; stdout: string; detail: string; meta: AgentMeta }> {
-	// With stream-json input, stdin stays open after the prompt, so budget
-	// notices can reach the running agent. An agent command without that
-	// flag (a stub, plain claude json mode) gets the prompt and EOF at once.
-	const streaming = ctx.opts.agentCmd.includes("--input-format");
-	// A margin comment points back to the session that wrote it. Claude takes
-	// its session id up front, and the same id goes into the environment, so
-	// the margin CLI's $CLAUDE_SESSION_ID default fills the pointer without
-	// the agent doing anything.
-	const sessionId = crypto.randomUUID();
-	const isClaude = ctx.opts.agentCmd[0]?.includes("claude");
-	const cmd = [
-		...ctx.opts.agentCmd,
-		...(isClaude ? ["--session-id", sessionId] : []),
-		...(model ? ["--model", model] : []),
-	];
+	const harnessId = harnessFor(ctx.bundle, node, ctx.opts);
+	const h = harness(harnessId);
+	const override = ctx.opts.agentCmd;
+	const spec = {
+		// dots names the session so the margin CLI can point a comment back at
+		// it. A harness that makes its own id reports that one instead, and
+		// the run file keeps whichever id came back.
+		sessionId: crypto.randomUUID(),
+		sessionDir: join(nodeFilesDir(ctx.run), `${id}.session`),
+		model: node.model,
+	};
+	const cmd = override
+		? [...override, ...(spec.model ? ["--model", spec.model] : [])]
+		: h.command(spec);
+	// An overriding command gets the prompt and EOF at once: dots cannot know
+	// whether it reads stdin after that.
+	const streaming = override ? false : h.acceptsFollowUps;
+	const reader = override ? harness("claude").reader() : h.reader();
 	const proc = Bun.spawn({
 		cmd,
 		cwd: ctx.opts.cwd,
@@ -242,17 +227,18 @@ async function spawnAgent(
 		stderr: "pipe",
 		env: {
 			...process.env,
-			CLAUDE_SESSION_ID: sessionId,
+			...(override ? { CLAUDE_SESSION_ID: spec.sessionId } : h.env(spec)),
 			DOTS_NODE_ID: id,
 			DOTS_GRAPH: ctx.run.graphName,
 			DOTS_RUN_ID: ctx.run.runId,
+			DOTS_HARNESS: harnessId,
 		},
 	});
 	const sink = streaming ? (proc.stdin as Bun.FileSink) : null;
 	let inputOpen = false;
 	if (sink) {
 		inputOpen = true;
-		sink.write(userMessage(prompt));
+		sink.write(h.followUp(prompt));
 		void sink.flush();
 	}
 	const closeInput = () => {
@@ -274,7 +260,7 @@ async function spawnAgent(
 						if (!inputOpen) return;
 						try {
 							sink.write(
-								userMessage(
+								h.followUp(
 									`Time budget notice: about ${m} minute${m === 1 ? "" : "s"} left for your group. Wrap up and return your result now.`,
 								),
 							);
@@ -298,52 +284,23 @@ async function spawnAgent(
 	);
 	const stderrDone = new Response(proc.stderr).text();
 
-	// stdout is consumed as it arrives. stream-json events become a readable
-	// tail in `<node>.stream.txt`; the `result` event carries the reply. An
-	// agent that prints plain text streams as-is and is unwrapped at the end.
-	let raw = "";
+	// stdout is consumed as it arrives. The harness reader turns each line
+	// into a readable tail for `<node>.stream.txt` and collects the reply,
+	// the session id, and the cost as they come past.
 	let lineBuf = "";
-	const final: { text?: string; sessionId?: string; costUsd?: number } = {};
 	const decoder = new TextDecoder();
 	const onLine = (line: string): string => {
-		const trimmed = line.trim();
-		if (!trimmed) return "";
-		try {
-			const ev = JSON.parse(trimmed) as {
-				type?: string;
-				session_id?: string;
-				result?: string;
-				total_cost_usd?: number;
-				message?: { content?: Array<{ type: string; text?: string; name?: string; input?: unknown }> };
-			};
-			if (ev && typeof ev.type === "string") {
-				if (ev.session_id) final.sessionId = ev.session_id;
-				if (ev.type === "assistant") {
-					let out = "";
-					for (const block of ev.message?.content ?? []) {
-						if (block.type === "text" && block.text) out += `${block.text}\n`;
-						else if (block.type === "tool_use") out += `⏺ ${block.name} ${summarizeToolInput(block.input)}\n`;
-					}
-					return out;
-				}
-				if (ev.type === "result") {
-					if (typeof ev.result === "string") final.text = ev.result;
-					if (typeof ev.total_cost_usd === "number") final.costUsd = ev.total_cost_usd;
-					// The reply is in: no more notices, and EOF lets claude exit.
-					for (const t of warnTimers) clearTimeout(t);
-					closeInput();
-				}
-				// system, user, and tool-result events are noise for the tail
-				return "";
-			}
-		} catch {
-			// plain-text agent
+		if (!line.trim()) return "";
+		const read = reader.line(line);
+		if (read.ended) {
+			// The reply is in: no more notices, and EOF lets the agent exit.
+			for (const t of warnTimers) clearTimeout(t);
+			closeInput();
 		}
-		return `${line}\n`;
+		return read.tail;
 	};
 	for await (const chunk of proc.stdout) {
 		const text = decoder.decode(chunk, { stream: true });
-		raw += text;
 		lineBuf += text;
 		let batch = "";
 		let nl: number;
@@ -361,11 +318,12 @@ async function spawnAgent(
 	const [stderr, code] = await Promise.all([stderrDone, proc.exited]);
 	clearTimeout(timer);
 	ctx.live.splice(ctx.live.indexOf(entry), 1);
-	const fallback = unwrapReply(raw);
-	const text = final.text ?? fallback.text;
+	const read = reader.result();
+	const text = read.text ?? "";
 	const meta: AgentMeta = {
-		sessionId: final.sessionId ?? fallback.meta.sessionId,
-		costUsd: final.costUsd ?? fallback.meta.costUsd,
+		harness: harnessId,
+		sessionId: read.sessionId ?? (override ? spec.sessionId : undefined),
+		costUsd: read.costUsd,
 	};
 	await saveNodeFile(ctx.run, `${id}.txt`, text + (stderr ? `\n--- stderr ---\n${stderr}` : ""));
 	if (code !== 0) {
@@ -441,7 +399,7 @@ async function runNode(
 		case "agent": {
 			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
 			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand, budget: promptBudget(budget) });
-			const res = await spawnAgent(ctx, id, below, prompt, budget?.deadline, gn.model);
+			const res = await spawnAgent(ctx, id, below, prompt, gn, budget?.deadline);
 			if (!res.ok) return finish("failed", { note: res.detail, ...res.meta }, "");
 			const parsed = parseReply(res.stdout);
 			if (parsed.skipped) return finish("skipped", { note: parsed.note, ...res.meta }, "");
@@ -457,7 +415,7 @@ async function runNode(
 			const noKids = (gn.elseChildren ?? []).filter((c) => ctx.bundle.doc.nodes[c]);
 			await saveNodeFile(ctx.run, `${id}.input.txt`, input);
 			const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand, budget: promptBudget(budget) });
-			const res = await spawnAgent(ctx, id, below, prompt, budget?.deadline, gn.model);
+			const res = await spawnAgent(ctx, id, below, prompt, gn, budget?.deadline);
 			res.meta.sessionId && (rn.sessionId = res.meta.sessionId);
 			res.meta.costUsd !== undefined && (rn.costUsd = res.meta.costUsd);
 			if (!res.ok) {
@@ -528,7 +486,7 @@ async function runNode(
 				if (settle(statuses) === "failed") return finish("failed", { note: `round ${round} failed` }, roundOut);
 				output = roundOut;
 				const prompt = composePrompt({ bundle: ctx.bundle, id, node: gn, input: output, target: ctx.run.target, vars: ctx.opts.vars, askCommand: ctx.opts.askCommand, budget: promptBudget(budget) });
-				const res = await spawnAgent(ctx, id, below, prompt, budget?.deadline, gn.model);
+				const res = await spawnAgent(ctx, id, below, prompt, gn, budget?.deadline);
 				if (!res.ok) return finish("failed", { note: res.detail }, output);
 				const parsed = parseReply(res.stdout);
 				if (parsed.verdict === "done") {
@@ -601,7 +559,7 @@ export async function retryNode(
 	const input = await readNodeFile(run, `${nodeId}.input.txt`);
 	await mark(ctx, nodeId, { status: "running", startedAt: new Date().toISOString(), note: undefined });
 	const prompt = composePrompt({ bundle, id: nodeId, node: gn, input, target: run.target, vars: opts.vars, askCommand: opts.askCommand });
-	const res = await spawnAgent(ctx, nodeId, [nodeId], prompt, undefined, gn.model);
+	const res = await spawnAgent(ctx, nodeId, [nodeId], prompt, gn);
 	const done = new Date().toISOString();
 	if (!res.ok) {
 		await mark(ctx, nodeId, { status: "failed", note: res.detail, finishedAt: done, ...res.meta });

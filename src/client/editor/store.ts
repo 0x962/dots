@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { HarnessId } from "../../core/harness";
 import type { GraphBundle, GraphNode, NodeKind } from "../../core/types";
 import { allChildren, carriesInstructions, isContainer } from "../../core/types";
 import { validateGraph } from "../../core/validate";
@@ -40,6 +41,7 @@ interface EditorState {
 	setNode: (id: string, patch: Partial<GraphNode>, label?: string) => void;
 	setInstructions: (id: string, text: string) => void;
 	setBriefing: (text: string) => void;
+	setGraphHarness: (harness: HarnessId | undefined) => void;
 	addChild: (parentId: string, kind: NodeKind, index?: number, branch?: "yes" | "no") => void;
 	deleteNode: (id: string) => void;
 	moveNode: (id: string, parentId: string, index: number, branch?: "yes" | "no") => void;
@@ -233,6 +235,12 @@ export const useEditor = create<EditorState>((set, get) => {
 		setBriefing: (text) =>
 			mutate("briefing", (b) => {
 				b.briefing = text;
+			}, true),
+
+		setGraphHarness: (harness) =>
+			mutate("graph-harness", (b) => {
+				if (harness) b.doc.harness = harness;
+				else b.doc.harness = undefined;
 			}, true),
 
 		addChild: (parentId, kind, index, branch) =>

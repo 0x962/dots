@@ -86,3 +86,8 @@ export async function appendNodeFile(
 	await mkdir(dir, { recursive: true });
 	await appendFile(join(dir, name), text, "utf8");
 }
+
+/** The `runs/<runId>.d/` folder itself, for files that are not plain text. */
+export function nodeFilesDir(run: GraphRun): string {
+	return join(runsDir(run.graphName), `${run.runId}.d`);
+}

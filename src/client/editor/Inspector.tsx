@@ -7,15 +7,26 @@ import {
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 } from "react";
+import type { HarnessId } from "../../core/harness";
 import { carriesInstructions } from "../../core/types";
 import { KIND } from "../shared/kinds";
 import { toast } from "../shared/toast";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useEditor } from "./store";
 
+function harnessLabel(id: HarnessId | undefined): string {
+	return id === "pi" ? "Pi" : "Claude Code";
+}
+
+function modelsFor(id: HarnessId | undefined): ModelGroup[] {
+	return id === "pi" ? PI_MODELS : CLAUDE_MODELS;
+}
+
+type ModelGroup = { group: string; options: Array<{ value: string; label: string }> };
+
 /** Passed verbatim to `claude --model`: aliases resolve to the latest of
  * each family; pinned ids stay on an exact model. */
-const MODEL_GROUPS: Array<{ group: string; options: Array<{ value: string; label: string }> }> = [
+const CLAUDE_MODELS: ModelGroup[] = [
 	{
 		group: "Latest",
 		options: [
@@ -35,6 +46,37 @@ const MODEL_GROUPS: Array<{ group: string; options: Array<{ value: string; label
 			{ value: "claude-sonnet-5", label: "Sonnet 5" },
 			{ value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
 			{ value: "claude-haiku-4-5", label: "Haiku 4.5" },
+		],
+	},
+];
+
+/**
+ * Passed verbatim to `pi --model`, which reads `<provider>/<model id>`.
+ * Vercel AI Gateway carries one key for every vendor below, so it is the
+ * first choice here; the direct providers need their own keys.
+ */
+const PI_MODELS: ModelGroup[] = [
+	{
+		group: "Vercel AI Gateway",
+		options: [
+			{ value: "vercel-ai-gateway/meta/muse-spark-1.1", label: "Meta Muse Spark 1.1" },
+			{ value: "vercel-ai-gateway/anthropic/claude-opus-5", label: "Claude Opus 5" },
+			{ value: "vercel-ai-gateway/anthropic/claude-sonnet-5", label: "Claude Sonnet 5" },
+			{ value: "vercel-ai-gateway/openai/gpt-5.6-sol", label: "GPT-5.6 Sol" },
+			{ value: "vercel-ai-gateway/openai/gpt-5.3-codex", label: "GPT-5.3 Codex" },
+			{ value: "vercel-ai-gateway/google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+			{ value: "vercel-ai-gateway/moonshotai/kimi-k3", label: "Kimi K3" },
+			{ value: "vercel-ai-gateway/minimax/minimax-m2", label: "MiniMax M2" },
+			{ value: "vercel-ai-gateway/zai/glm-5.2", label: "GLM 5.2" },
+		],
+	},
+	{
+		group: "Direct",
+		options: [
+			{ value: "anthropic/claude-opus-5", label: "Anthropic: Claude Opus 5" },
+			{ value: "openai/gpt-5.6-sol", label: "OpenAI: GPT-5.6 Sol" },
+			{ value: "google/gemini-3.1-pro-preview", label: "Google: Gemini 3.1 Pro" },
+			{ value: "openrouter/meta/muse-spark-1.1", label: "OpenRouter: Meta Muse Spark 1.1" },
 		],
 	},
 ];
@@ -82,6 +124,7 @@ export function Inspector() {
 	const setNode = useEditor((s) => s.setNode);
 	const setInstructions = useEditor((s) => s.setInstructions);
 	const setBriefing = useEditor((s) => s.setBriefing);
+	const setGraphHarness = useEditor((s) => s.setGraphHarness);
 	const deleteNode = useEditor((s) => s.deleteNode);
 	const shiftNode = useEditor((s) => s.shiftNode);
 	const commitTitle = useEditor((s) => s.commitTitle);
@@ -113,6 +156,23 @@ export function Inspector() {
 						<ExpandButton target="briefing" title="Open the full editor" />
 					</div>
 				</div>
+				<div className="field">
+					<label>Harness</label>
+					<select
+						className="select"
+						value={bundle.doc.harness ?? ""}
+						onChange={(e) => setGraphHarness((e.target.value || undefined) as HarnessId | undefined)}
+					>
+						<option value="">Whatever the run asks for</option>
+						<option value="claude">Claude Code</option>
+						<option value="pi">Pi</option>
+					</select>
+					<span className="hint">
+						the coding-agent CLI every node runs in, unless the node picks its own. A run
+						with no harness of its own uses claude, or DOTS_HARNESS.
+					</span>
+				</div>
+
 				<MarkdownEditor
 					tall
 					value={bundle.briefing}
@@ -166,28 +226,55 @@ export function Inspector() {
 				</div>
 
 				{["agent", "gate", "loop"].includes(node.kind) && (
-					<div className="field">
-						<label>Model</label>
-						<select
-							className="select"
-							value={node.model ?? ""}
-							onChange={(e) =>
-								setNode(selection, { model: e.target.value || undefined }, `model:${selection}`)
-							}
-						>
-							<option value="">Default (CLI setting)</option>
-							{MODEL_GROUPS.map((g) => (
-								<optgroup key={g.group} label={g.group}>
-									{g.options.map((m) => (
-										<option key={m.value} value={m.value}>
-											{m.label}
-										</option>
-									))}
-								</optgroup>
-							))}
-						</select>
-						<span className="hint">the claude model this node's agent runs on</span>
-					</div>
+					<>
+						<div className="field">
+							<label>Harness</label>
+							<select
+								className="select"
+								value={node.harness ?? ""}
+								onChange={(e) =>
+									setNode(
+										selection,
+										{
+											harness: (e.target.value || undefined) as HarnessId | undefined,
+											// A claude model name means nothing to pi, and the other
+											// way round, so the model starts over with the harness.
+											model: undefined,
+										},
+										`harness:${selection}`,
+									)
+								}
+							>
+								<option value="">Graph default ({harnessLabel(bundle.doc.harness)})</option>
+								<option value="claude">Claude Code</option>
+								<option value="pi">Pi</option>
+							</select>
+							<span className="hint">the coding-agent CLI this node's agent runs in</span>
+						</div>
+
+						<div className="field">
+							<label>Model</label>
+							<select
+								className="select"
+								value={node.model ?? ""}
+								onChange={(e) =>
+									setNode(selection, { model: e.target.value || undefined }, `model:${selection}`)
+								}
+							>
+								<option value="">Default (CLI setting)</option>
+								{modelsFor(node.harness ?? bundle.doc.harness).map((g) => (
+									<optgroup key={g.group} label={g.group}>
+										{g.options.map((m) => (
+											<option key={m.value} value={m.value}>
+												{m.label}
+											</option>
+										))}
+									</optgroup>
+								))}
+							</select>
+							<span className="hint">the model this node's agent runs on</span>
+						</div>
+					</>
 				)}
 
 				{node.kind === "budget" && (

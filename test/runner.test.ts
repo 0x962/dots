@@ -21,6 +21,7 @@ function opts(): RunnerOptions {
 	return {
 		target: "demo",
 		vars: {},
+		harness: "claude",
 		agentCmd: ["bun", STUB],
 		cwd: dir,
 		nodeTimeoutMinutes: 1,

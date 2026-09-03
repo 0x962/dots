@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
-import { buildRun, defaultAgentCmd, executeRun, expandHome, retryNode } from "./core/runner";
-import { latestRun, listRuns, loadRun, readNodeFile, saveRun } from "./core/runstore";
+import { join } from "node:path";
+import { defaultHarnessId, harness, isHarnessId } from "./core/harness";
+import { agentCmdOverride, buildRun, executeRun, expandHome, retryNode } from "./core/runner";
+import { latestRun, listRuns, loadRun, nodeFilesDir, readNodeFile, saveRun } from "./core/runstore";
 import { graphsRoot, loadGraph } from "./core/store";
 import { validateGraph } from "./core/validate";
 
@@ -10,7 +12,7 @@ function usage(): never {
   dots start <graph> --target <text> [--var K=V]... [--cwd <dir>]
       detached run through the server; prints {"runId": ...} at once
   dots status <graph> [runId] [--json]   run state, per-node; latest when no id
-  dots run <graph> --target <text> [--var K=V]... [--cwd <dir>]
+  dots run <graph> --target <text> [--var K=V]... [--cwd <dir>] [--harness claude|pi]
   dots resume <graph> [runId] [--cwd <dir>]
   dots approve <graph> <nodeId> [--note <text>] [--run <runId>]
   dots reject <graph> <nodeId> [--note <text>] [--run <runId>]
@@ -23,8 +25,12 @@ function usage(): never {
       from the node agent's own session; nodes get this too, so later agents
       can question earlier ones instead of guessing
 
-The agent command comes from DOTS_AGENT_CMD (default: claude -p
---dangerously-skip-permissions); each node's prompt arrives on stdin.`);
+Every node runs in a harness: claude (Claude Code) or pi
+(@mariozechner/pi-coding-agent, which reaches Vercel AI Gateway, OpenRouter,
+and the model providers directly). A node's own choice wins, then the
+graph's, then --harness, then DOTS_HARNESS, then claude. DOTS_AGENT_CMD
+replaces the harness command for every node. Each node's prompt arrives on
+stdin.`);
 	process.exit(1);
 }
 
@@ -58,7 +64,8 @@ function opts(opt: Record<string, string>, vars: Record<string, string>, target:
 	return {
 		target,
 		vars,
-		agentCmd: defaultAgentCmd(),
+		harness: isHarnessId(opt.harness) ? opt.harness : defaultHarnessId(),
+		agentCmd: agentCmdOverride(),
 		cwd: expandHome(opt.cwd) ?? process.cwd(),
 		nodeTimeoutMinutes: Number(process.env.DOTS_NODE_TIMEOUT_MIN ?? 30),
 		askCommand: runId ? askCommandFor(runId) : undefined,
@@ -135,9 +142,10 @@ if (cmd === "run") {
 		console.error(`${nodeId} has no agent session to ask (status: ${rn?.status ?? "missing"}).`);
 		process.exit(1);
 	}
-	const cmdline = (process.env.DOTS_ASK_CMD ?? "claude -p --output-format text --resume {SESSION}")
-		.replace("{SESSION}", rn.sessionId)
-		.split(/\s+/);
+	const sessionDir = join(nodeFilesDir(run), `${nodeId}.session`);
+	const cmdline = process.env.DOTS_ASK_CMD
+		? process.env.DOTS_ASK_CMD.replace("{SESSION}", rn.sessionId).split(/\s+/)
+		: harness(rn.harness ?? "claude").ask({ sessionId: rn.sessionId, sessionDir });
 	const proc = Bun.spawn({
 		cmd: cmdline,
 		cwd: expandHome(run.cwd) ?? process.cwd(),
@@ -195,8 +203,13 @@ if (cmd === "run") {
 			console.error(`${nodeId} recorded no agent session (a stub agent, or the node never spawned).`);
 			process.exit(1);
 		}
-		console.log(`resuming session ${rn.sessionId} · exit that chat to come back`);
-		const proc = Bun.spawn({ cmd: ["claude", "--resume", rn.sessionId], stdio: ["inherit", "inherit", "inherit"], cwd: expandHome(opt.cwd ?? run.cwd) ?? process.cwd() });
+		const h = harness(rn.harness ?? "claude");
+		console.log(`resuming the ${h.label} session ${rn.sessionId} · exit that chat to come back`);
+		const proc = Bun.spawn({
+			cmd: h.resume({ sessionId: rn.sessionId, sessionDir: join(nodeFilesDir(run), `${nodeId}.session`) }),
+			stdio: ["inherit", "inherit", "inherit"],
+			cwd: expandHome(opt.cwd ?? run.cwd) ?? process.cwd(),
+		});
 		process.exit(await proc.exited);
 	}
 } else if (cmd === "start") {
