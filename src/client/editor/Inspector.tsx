@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Maximize2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Maximize2, Play, Trash2 } from "lucide-react";
 import {
 	useEffect,
 	useRef,
@@ -61,6 +61,7 @@ export function Inspector() {
 	const setInstructions = useEditor((s) => s.setInstructions);
 	const setBriefing = useEditor((s) => s.setBriefing);
 	const setGraphHarness = useEditor((s) => s.setGraphHarness);
+	const openNodeTest = useEditor((s) => s.setExpanded);
 	const { catalogs, loading, refresh } = useHarnessCatalog();
 	const deleteNode = useEditor((s) => s.deleteNode);
 	const shiftNode = useEditor((s) => s.shiftNode);
@@ -173,6 +174,19 @@ export function Inspector() {
 						onRefresh={refresh}
 						onChange={(patch) => setNode(selection, patch, `run:${selection}`)}
 					/>
+				)}
+
+				{["agent", "gate", "loop"].includes(node.kind) && (
+					<div className="field">
+						<button
+							type="button"
+							className="btn primary"
+							title="Run this one node against a target, without the rest of the graph"
+							onClick={() => openNodeTest(selection, true)}
+						>
+							<Play size={13} /> Run this node
+						</button>
+					</div>
 				)}
 
 				{node.kind === "budget" && (

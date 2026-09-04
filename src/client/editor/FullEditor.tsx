@@ -27,8 +27,9 @@ export function FullEditor() {
 	const setNode = useEditor((s) => s.setNode);
 	const setInstructions = useEditor((s) => s.setInstructions);
 	const setBriefing = useEditor((s) => s.setBriefing);
-	const [testing, setTesting] = useState(false);
-	useEffect(() => setTesting(false), [expanded]);
+	const expandedForTest = useEditor((s) => s.expandedForTest);
+	const [testing, setTesting] = useState(expandedForTest);
+	useEffect(() => setTesting(expandedForTest), [expanded, expandedForTest]);
 
 	if (!expanded || !bundle) return null;
 

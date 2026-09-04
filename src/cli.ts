@@ -1,8 +1,23 @@
 #!/usr/bin/env bun
 import { join } from "node:path";
 import { defaultHarnessId, harness, isHarnessId } from "./core/harness";
-import { agentCmdOverride, buildRun, executeRun, expandHome, retryNode } from "./core/runner";
-import { latestRun, listRuns, loadRun, nodeFilesDir, readNodeFile, saveRun } from "./core/runstore";
+import {
+	agentCmdOverride,
+	buildRun,
+	buildTestRun,
+	executeRun,
+	expandHome,
+	retryNode,
+} from "./core/runner";
+import {
+	latestRun,
+	listRuns,
+	loadRun,
+	nodeFilesDir,
+	readNodeFile,
+	saveNodeFile,
+	saveRun,
+} from "./core/runstore";
 import { graphsRoot, loadGraph } from "./core/store";
 import { validateGraph } from "./core/validate";
 
@@ -19,6 +34,8 @@ function usage(): never {
   dots runs <graph> [--json]
   dots plan <graph>
   dots show <graph> <nodeId> [--run <runId>] [--prompt] [--reply]
+  dots test <graph> <nodeId> --target <text> [--input <text>] [--cwd <dir>]
+      run one node's agent on its own, without the rest of the graph
   dots retry <graph> <nodeId> [--run <runId>] [--cwd <dir>]
   dots debug <graph> <nodeId> [--run <runId>]   resume the node's agent session
   dots ask <graph> <nodeId> "<question>" [--run <runId>]   one question, answered
@@ -166,6 +183,31 @@ if (cmd === "run") {
 	const log = await readAsk(run, `${nodeId}.asks.txt`);
 	await saveNodeFile(run, `${nodeId}.asks.txt`, `${log}Q: ${question}\nA: ${answer.trim()}\n\n`);
 	console.log(answer.trim());
+} else if (cmd === "test") {
+	// One node, run by itself against a target. The graph is not walked, so
+	// nothing upstream feeds it: whatever --input says is its whole input.
+	const nodeId = pos[1];
+	if (!nodeId || !opt.target?.trim()) usage();
+	const gn = bundle.doc.nodes[nodeId];
+	if (!gn) {
+		console.error(`no node "${nodeId}" in ${graphName}`);
+		process.exit(1);
+	}
+	if (gn.kind !== "agent" && gn.kind !== "gate" && gn.kind !== "loop") {
+		console.error(`a ${gn.kind} runs no agent of its own`);
+		process.exit(1);
+	}
+	const run = buildTestRun(bundle, graphName, nodeId, opt.target);
+	run.cwd = expandHome(opt.cwd) ?? process.cwd();
+	run.vars = vars;
+	await saveRun(run);
+	await saveNodeFile(run, `${nodeId}.input.txt`, opt.input ?? "");
+	console.log(`${run.runId} · ${nodeId} · target: ${opt.target}`);
+	const done = await retryNode(bundle, run, nodeId, opts(opt, vars, opt.target, run.runId));
+	console.log(`\n${nodeId} → ${done.status}${done.note ? ` · ${done.note}` : ""}`);
+	const reply = await readNodeFile(run, `${nodeId}.txt`);
+	if (reply.trim()) console.log(`\n${reply.trim()}`);
+	process.exit(done.status === "failed" ? 1 : 0);
 } else if (cmd === "show" || cmd === "retry" || cmd === "debug") {
 	const nodeId = pos[1];
 	if (!nodeId) usage();

@@ -25,6 +25,9 @@ interface EditorState {
 	focus: { id: string; nonce: number } | null;
 	/** Node id (or "briefing") open in the full-screen prompt editor. */
 	expanded: string | null;
+	/** Set when the full editor was opened by "Run this node", so the test
+	 *  pane is already open when it appears. */
+	expandedForTest: boolean;
 	past: string[];
 	future: string[];
 	saving: boolean;
@@ -33,7 +36,7 @@ interface EditorState {
 	open: (name: string) => Promise<void>;
 	refreshGraphs: () => Promise<void>;
 	select: (id: string | null, focus?: boolean) => void;
-	setExpanded: (id: string | null) => void;
+	setExpanded: (id: string | null, forTest?: boolean) => void;
 	undo: () => void;
 	redo: () => void;
 	save: () => Promise<boolean>;
@@ -133,6 +136,7 @@ export const useEditor = create<EditorState>((set, get) => {
 		selection: null,
 		focus: null,
 		expanded: null,
+		expandedForTest: false,
 		past: [],
 		future: [],
 		saving: false,
@@ -157,6 +161,7 @@ export const useEditor = create<EditorState>((set, get) => {
 				selection: null,
 				focus: null,
 				expanded: null,
+				expandedForTest: false,
 				past: [],
 				future: [],
 			});
@@ -169,7 +174,12 @@ export const useEditor = create<EditorState>((set, get) => {
 				focus: focus && id ? { id, nonce: (s.focus?.nonce ?? 0) + 1 } : s.focus,
 			})),
 
-		setExpanded: (id) => set({ expanded: id, ...(id && id !== "briefing" ? { selection: id } : {}) }),
+		setExpanded: (id, forTest = false) =>
+			set({
+				expanded: id,
+				expandedForTest: forTest,
+				...(id && id !== "briefing" ? { selection: id } : {}),
+			}),
 
 		undo: () => {
 			const { past, future, bundle } = get();

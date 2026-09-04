@@ -152,6 +152,21 @@ them in; see [pi's models doc](https://github.com/badlogic/pi-mono/blob/main/pac
   moves on, AGAIN starts the next round, capped by `maxRounds`.
 - `human` parks the run until a person answers on the board.
 
+## Running one node
+
+A node can be run on its own, without the rest of the graph. The editor's
+inspector has a `Run this node` button beside the model picker; it opens
+the node with a target box, an input box, and the reply. The same thing
+from a terminal:
+
+```
+dots test review naming --target https://github.com/o/r/pull/12
+```
+
+Only that node runs. Nothing upstream feeds it, so whatever `--input` says
+is its whole input, and the node uses its own harness, model and effort.
+The result lands in `runs/` like any other run, under a `test-` id.
+
 ## One folder per graph
 
 ```
@@ -174,6 +189,9 @@ dots run <graph> --target <text>   start a run (--var K=V fills {K})
 dots runs                          list run history
 dots plan <graph>                  print the tree
 dots show <graph> <node>           print a node's verdict and reply
+dots test <graph> <node>           run one node's agent on its own
+                                   --target <text>, and --input for what
+                                   the step before it would have passed
 dots retry <graph> <node>          re-run one node with its recorded input
 dots debug <graph> <node>          resume the node's agent session
 dots ask <graph> <node> "<q>"      ask one question, log the answer
