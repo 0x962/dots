@@ -29,7 +29,6 @@ export function ModelPicker({
 	catalogs,
 	loading,
 	onChange,
-	onRefresh,
 }: {
 	value: ModelChoice;
 	/** The harness this node inherits when it names none. */
@@ -37,7 +36,6 @@ export function ModelPicker({
 	catalogs: HarnessCatalog[];
 	loading: boolean;
 	onChange: (patch: ModelChoice) => void;
-	onRefresh: () => void;
 }) {
 	const activeId = value.harness ?? fallbackHarness;
 	const catalog = catalogs.find((c) => c.id === activeId);
@@ -164,9 +162,6 @@ export function ModelPicker({
 				</span>
 			</div>
 
-			<button type="button" className="btn ghost sm" onClick={onRefresh}>
-				Reload the model list
-			</button>
 		</>
 	);
 }

@@ -1,4 +1,4 @@
-import { Check, RotateCcw, X } from "lucide-react";
+import { Check, Play, RotateCcw, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { RunNode } from "../../core/types";
 import { api, type NodeDetail } from "../shared/api";
@@ -36,6 +36,10 @@ export function NodeDrawer({
 	const bodyRef = useRef<HTMLDivElement>(null);
 	// Containers and human nodes run no agent: no prompt, no reply to show.
 	const hasTranscript = ["agent", "gate", "loop"].includes(node.kind);
+	// A node the run never reached has no recorded input, so running it from
+	// here starts it on an empty one rather than on what a step before it
+	// would have passed. That is the point: one checker, on its own.
+	const ranBefore = node.status !== "pending";
 
 	useEffect(() => {
 		if (!hasTranscript) return;
@@ -79,21 +83,25 @@ export function NodeDrawer({
 					<kind.Icon size={15} />
 				</span>
 				<div className="dr-title grow">{node.title}</div>
-				{!live && hasTranscript && node.status !== "pending" && (
+				{!live && hasTranscript && (
 					<button
 						type="button"
 						className="btn ghost icon sm"
-						title="Run this one node again, with its recorded input and the graph's current instructions"
+						title={
+							ranBefore
+								? "Run this one node again, with its recorded input and the graph's current instructions"
+								: "Run just this node, without the rest of the graph"
+						}
 						onClick={() => {
 							void api
 								.retryRunNode(graph, runId, node.id)
-								.then(() => toast("Node re-running"))
+								.then(() => toast(ranBefore ? "Node re-running" : "Node running"))
 								.catch((error: unknown) =>
 									toast(error instanceof Error ? error.message : String(error), "error"),
 								);
 						}}
 					>
-						<RotateCcw size={13} />
+						{ranBefore ? <RotateCcw size={13} /> : <Play size={13} />}
 					</button>
 				)}
 				<button type="button" className="btn ghost icon sm" onClick={onClose}>

@@ -62,7 +62,7 @@ export function Inspector() {
 	const setBriefing = useEditor((s) => s.setBriefing);
 	const setGraphHarness = useEditor((s) => s.setGraphHarness);
 	const openNodeTest = useEditor((s) => s.setExpanded);
-	const { catalogs, loading, refresh } = useHarnessCatalog();
+	const { catalogs, loading } = useHarnessCatalog();
 	const deleteNode = useEditor((s) => s.deleteNode);
 	const shiftNode = useEditor((s) => s.shiftNode);
 	const commitTitle = useEditor((s) => s.commitTitle);
@@ -171,7 +171,6 @@ export function Inspector() {
 						fallbackHarness={bundle.doc.harness ?? "claude"}
 						catalogs={catalogs}
 						loading={loading}
-						onRefresh={refresh}
 						onChange={(patch) => setNode(selection, patch, `run:${selection}`)}
 					/>
 				)}

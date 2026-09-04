@@ -156,7 +156,10 @@ them in; see [pi's models doc](https://github.com/badlogic/pi-mono/blob/main/pac
 
 A node can be run on its own, without the rest of the graph. The editor's
 inspector has a `Run this node` button beside the model picker; it opens
-the node with a target box, an input box, and the reply. The same thing
+the node with a target box, an input box, and the reply. The run board has
+the same thing on every node, including one the run never reached, which
+is how a single checker is fired at a pull request from margin's review
+tab. The same thing
 from a terminal:
 
 ```
