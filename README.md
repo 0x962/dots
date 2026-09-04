@@ -75,9 +75,30 @@ editor's inspector, or write them into `graph.json`:
 
 A model name goes to the harness verbatim, so it is spelled the harness's
 way: a claude alias or id (`opus`, `claude-opus-5`) for claude,
-`<provider>/<model id>` for pi
-(`vercel-ai-gateway/meta/muse-spark-1.1`). Pi also takes a thinking level
-on the end of the name: `vercel-ai-gateway/openai/gpt-5.6-sol:high`.
+`<provider>/<model id>` for pi (`vercel-ai-gateway/meta/muse-spark-1.1`).
+
+The inspector does not keep a list of models. It asks the server, which
+runs `pi --list-models`, so the models offered are the ones pi really
+reaches on this machine today. The provider dropdown is the first segment
+of the pi model name; picking one filters the model list. `Reload the
+model list` throws away the server's cached answer, which is what to press
+after upgrading pi or adding a key.
+
+### Effort
+
+`effort` is how hard the model thinks before it answers. The two harnesses
+disagree on both the flag and the levels, and dots never translates between
+them:
+
+| Harness | Flag | Levels |
+|---|---|---|
+| `claude` | `--effort` | low, medium, high, xhigh, max |
+| `pi` | `--thinking` | off, minimal, low, medium, high, xhigh |
+
+So an effort only means something beside the harness it was chosen for, and
+changing a node's harness clears its model and its effort. Not every model
+thinks: `pi --list-models` says which do, and the inspector greys the effort
+out on a model that does not.
 
 Two differences to know before you move a node to pi:
 
@@ -93,12 +114,20 @@ Two differences to know before you move a node to pi:
 ### Vercel AI Gateway
 
 One key reaches every vendor. Get it from
-[vercel.com/dashboard/ai-gateway](https://vercel.com/dashboard/ai-gateway)
-and export it:
+[vercel.com/dashboard/ai-gateway](https://vercel.com/dashboard/ai-gateway).
 
-```bash
-export AI_GATEWAY_API_KEY=vck_...
+Put it in pi's own auth file, not in your shell:
+
+```json
+// ~/.pi/agent/auth.json
+{ "vercel-ai-gateway": "vck_..." }
 ```
+
+A key exported in a shell reaches a `dots run` you type yourself and nothing
+else. The dots server normally runs under launchd, whose environment carries
+`PATH` and nothing more, so a run started from the board or by `dots start`
+spawns a pi that cannot see it. Every process running as you reads
+`auth.json`, which is why the key belongs there.
 
 Pi ships its model list with each release, so the newest gateway models are
 missing from a pi that is a few weeks old. `~/.pi/agent/models.json` fills

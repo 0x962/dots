@@ -2,7 +2,13 @@ import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import index from "./client/index.html";
 import runsPage from "./client/runs.html";
-import { defaultHarnessId } from "./core/harness";
+import {
+	type CatalogModel,
+	HARNESS_IDS,
+	defaultHarnessId,
+	harness,
+	isHarnessId,
+} from "./core/harness";
 import {
 	buildRun,
 	buildTestRun,
@@ -25,6 +31,23 @@ import type { GraphBundle, GraphRun } from "./core/types";
 import { validateGraph } from "./core/validate";
 
 const PORT = Number(process.env.DOTS_PORT ?? 4517);
+
+/**
+ * Asking pi for its models spawns a process and takes about a second, and
+ * the model picker asks on every node the person clicks. The answer only
+ * changes when pi is upgraded or a key is added, so it is kept until the
+ * server restarts. `?refresh=1` throws the kept answer away.
+ */
+const modelCache = new Map<string, CatalogModel[]>();
+
+async function catalogFor(id: string, refresh: boolean): Promise<CatalogModel[]> {
+	if (refresh) modelCache.delete(id);
+	const kept = modelCache.get(id);
+	if (kept) return kept;
+	const models = await harness(isHarnessId(id) ? id : "claude").catalog();
+	modelCache.set(id, models);
+	return models;
+}
 const CLI = join(import.meta.dir, "cli.ts");
 
 /** Run keys with a runner child alive in this server, to stop double-resumes. */
@@ -136,6 +159,24 @@ const server = Bun.serve({
 	routes: {
 		"/": index,
 		"/runs": runsPage,
+		"/api/harnesses": {
+			GET: async (req) => {
+				const refresh = new URL(req.url).searchParams.has("refresh");
+				const harnesses = await Promise.all(
+					HARNESS_IDS.map(async (id) => {
+						const h = harness(id);
+						return {
+							id,
+							label: h.label,
+							efforts: h.efforts,
+							noModelsHint: h.noModelsHint,
+							models: await catalogFor(id, refresh),
+						};
+					}),
+				);
+				return Response.json({ harnesses });
+			},
+		},
 		"/api/graphs": {
 			GET: async () => Response.json({ graphs: await listGraphs() }),
 			POST: async (req) => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { CLAUDE, PI, defaultHarnessId, harness, isHarnessId } from "../src/core/harness";
+import {
+	CLAUDE,
+	PI,
+	defaultHarnessId,
+	harness,
+	isHarnessId,
+	parsePiModels,
+} from "../src/core/harness";
 
 function read(h: typeof PI, lines: string[]) {
 	const r = h.reader();
@@ -119,5 +126,75 @@ describe("harness names", () => {
 		expect(defaultHarnessId()).toBe("claude");
 		if (before === undefined) delete process.env.DOTS_HARNESS;
 		else process.env.DOTS_HARNESS = before;
+	});
+});
+
+describe("the pi model catalog", () => {
+	const TABLE = [
+		"provider           model                      context  max-out  thinking  images",
+		"vercel-ai-gateway  meta/muse-spark-1.1        1.0M     1.0M     yes       yes   ",
+		"vercel-ai-gateway  alibaba/qwen-3-235b        131K     40K      no        no    ",
+		"openrouter         anthropic/claude-opus-5    200K     64K      yes       yes   ",
+		"",
+	].join("\n");
+
+	it("reads a row per model, and keeps the provider in the id", () => {
+		const models = parsePiModels(TABLE);
+		expect(models).toHaveLength(3);
+		expect(models[0]).toEqual({
+			id: "vercel-ai-gateway/meta/muse-spark-1.1",
+			provider: "vercel-ai-gateway",
+			label: "meta/muse-spark-1.1",
+			contextWindow: 1_000_000,
+			thinks: true,
+		});
+	});
+
+	it("marks a model with no thinking mode, so effort can grey out", () => {
+		const models = parsePiModels(TABLE);
+		expect(models.find((m) => m.label === "alibaba/qwen-3-235b")?.thinks).toBe(
+			false,
+		);
+	});
+
+	it("drops the header and blank lines", () => {
+		expect(parsePiModels(TABLE).some((m) => m.provider === "provider")).toBe(
+			false,
+		);
+	});
+
+	it("returns nothing when pi has no key, which prints a sentence", () => {
+		expect(
+			parsePiModels("No models available. Use /login to log into a provider"),
+		).toEqual([]);
+	});
+
+	it("reads K and M token counts", () => {
+		const models = parsePiModels(TABLE);
+		expect(models.find((m) => m.label === "alibaba/qwen-3-235b")?.contextWindow).toBe(131_000);
+	});
+});
+
+describe("effort", () => {
+	it("gives claude --effort and pi --thinking, each its own levels", () => {
+		expect(
+			CLAUDE.command({ sessionId: "s", sessionDir: "/d", effort: "max" }),
+		).toContain("--effort");
+		expect(PI.command({ sessionId: "s", sessionDir: "/d", effort: "off" })).toContain(
+			"--thinking",
+		);
+		expect(CLAUDE.efforts).toContain("max");
+		expect(CLAUDE.efforts).not.toContain("off");
+		expect(PI.efforts).toContain("off");
+		expect(PI.efforts).not.toContain("max");
+	});
+
+	it("passes no flag when the node names no effort", () => {
+		expect(CLAUDE.command({ sessionId: "s", sessionDir: "/d" })).not.toContain(
+			"--effort",
+		);
+		expect(PI.command({ sessionId: "s", sessionDir: "/d" })).not.toContain(
+			"--thinking",
+		);
 	});
 });

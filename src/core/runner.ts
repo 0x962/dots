@@ -211,6 +211,7 @@ async function spawnAgent(
 		sessionId: crypto.randomUUID(),
 		sessionDir: join(nodeFilesDir(ctx.run), `${id}.session`),
 		model: node.model,
+		effort: node.effort,
 	};
 	const cmd = override
 		? [...override, ...(spec.model ? ["--model", spec.model] : [])]

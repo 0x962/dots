@@ -54,6 +54,13 @@ export interface GraphNode {
 	 * means the harness picks.
 	 */
 	model?: string;
+	/**
+	 * How hard this node's model thinks before it answers. The levels differ
+	 * by harness, so a value here only means anything next to `harness`:
+	 * claude takes low through max, pi takes off through xhigh. Unset leaves
+	 * the CLI's own default.
+	 */
+	effort?: string;
 	/** budget: the time box in minutes. */
 	minutes?: number;
 	/** loop: the round cap. */

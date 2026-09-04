@@ -26,6 +26,26 @@ export interface SpawnSpec {
 	sessionDir: string;
 	/** The model, as the harness spells it. Unset means the harness default. */
 	model?: string;
+	/**
+	 * How hard the model thinks before it answers. The two harnesses neither
+	 * spell this the same way nor offer the same levels, so the value here is
+	 * always one of `Harness.efforts` for the harness it is going to.
+	 */
+	effort?: string;
+}
+
+/** One model a harness can run, as the model picker needs it. */
+export interface CatalogModel {
+	/** Passed to `--model` verbatim. For pi this is `<provider>/<model id>`. */
+	id: string;
+	/** The vendor or gateway the model is reached through. */
+	provider: string;
+	/** What to show in the list. */
+	label: string;
+	/** Context window in tokens, when the harness reports one. */
+	contextWindow?: number;
+	/** False when the model has no thinking mode, so effort does nothing. */
+	thinks: boolean;
 }
 
 /** What one line of harness output added. */
@@ -49,6 +69,19 @@ export interface OutputReader {
 export interface Harness {
 	id: HarnessId;
 	label: string;
+	/**
+	 * The effort levels this CLI accepts, weakest first. dots never
+	 * translates between harnesses: `max` is claude's and has no pi
+	 * equivalent, `off` and `minimal` are pi's and have no claude one.
+	 */
+	efforts: readonly string[];
+	/**
+	 * Every model this harness can reach right now. pi is asked; claude has
+	 * no command that lists models, so its list is written down here.
+	 */
+	catalog(): Promise<CatalogModel[]>;
+	/** What to tell someone whose catalog came back empty. */
+	noModelsHint: string;
 	/** The command that runs one node. The prompt arrives on stdin. */
 	command(spec: SpawnSpec): string[];
 	/**
@@ -126,14 +159,33 @@ function claudeReader(): OutputReader {
 	};
 }
 
+/**
+ * Claude has no command that prints its models, so the aliases and the
+ * pinned ids live here. An alias follows the newest model of its family; a
+ * pinned id stays on the exact one. Every Claude model thinks.
+ */
+const CLAUDE_MODELS: CatalogModel[] = [
+	{ id: "opus", label: "Opus (latest)" },
+	{ id: "sonnet", label: "Sonnet (latest)" },
+	{ id: "haiku", label: "Haiku (latest)" },
+	{ id: "claude-fable-5", label: "Fable 5" },
+	{ id: "claude-opus-5", label: "Opus 5" },
+	{ id: "claude-opus-4-8", label: "Opus 4.8" },
+	{ id: "claude-sonnet-5", label: "Sonnet 5" },
+	{ id: "claude-haiku-4-5", label: "Haiku 4.5" },
+].map((m) => ({ ...m, provider: "anthropic", thinks: true }));
+
 export const CLAUDE: Harness = {
 	id: "claude",
 	label: "Claude Code",
+	efforts: ["low", "medium", "high", "xhigh", "max"],
+	catalog: async () => CLAUDE_MODELS,
+	noModelsHint: "run `claude` once and sign in",
 	// stream-json out emits one JSON line per event as the agent works, which
 	// is what lets the run view tail a node while it is still thinking.
 	// stream-json in keeps stdin open, so time-budget notices can reach a
 	// running agent as follow-up user messages.
-	command: ({ sessionId, model }) => [
+	command: ({ sessionId, model, effort }) => [
 		"claude",
 		"-p",
 		"--dangerously-skip-permissions",
@@ -145,6 +197,7 @@ export const CLAUDE: Harness = {
 		"--session-id",
 		sessionId,
 		...(model ? ["--model", model] : []),
+		...(effort ? ["--effort", effort] : []),
 	],
 	acceptsFollowUps: true,
 	followUp: (text) =>
@@ -244,14 +297,69 @@ function piReader(): OutputReader {
 	};
 }
 
+/**
+ * `pi --list-models` prints one model per line under a header, six columns
+ * wide: provider, model, context, max-out, thinking, images. Nothing in a
+ * provider name or a model id contains a space, so the columns split on
+ * whitespace.
+ *
+ * pi only lists a provider it has a key for, so an empty list means no
+ * credentials rather than no models. Vercel AI Gateway reads
+ * AI_GATEWAY_API_KEY.
+ */
+export function parsePiModels(stdout: string): CatalogModel[] {
+	const out: CatalogModel[] = [];
+	for (const line of stdout.split("\n")) {
+		const cols = line.trim().split(/\s+/);
+		if (cols.length !== 6) continue;
+		const [provider, id, context, , thinking] = cols;
+		if (provider === "provider") continue; // the header row
+		out.push({
+			id: `${provider}/${id}`,
+			provider,
+			label: id,
+			contextWindow: parseTokenCount(context),
+			thinks: thinking === "yes",
+		});
+	}
+	return out;
+}
+
+/** "41.0K" and "1.0M" as pi prints them, back to a token count. */
+function parseTokenCount(text: string): number | undefined {
+	const m = /^([\d.]+)([KM])?$/.exec(text);
+	if (!m) return undefined;
+	const scale = m[2] === "M" ? 1_000_000 : m[2] === "K" ? 1_000 : 1;
+	return Math.round(Number(m[1]) * scale);
+}
+
 export const PI: Harness = {
 	id: "pi",
 	label: "Pi",
+	efforts: ["off", "minimal", "low", "medium", "high", "xhigh"],
+	catalog: async () => {
+		const proc = Bun.spawn({
+			cmd: ["pi", "--list-models"],
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [stdout] = await Promise.all([
+			new Response(proc.stdout).text(),
+			proc.exited,
+		]);
+		return parsePiModels(stdout);
+	},
+	// The dots server runs under launchd, whose environment carries PATH and
+	// nothing else, so an API key exported in a shell never reaches it. Keys
+	// in pi's own auth.json are read by any process running as this person,
+	// which is why that file is the answer and not an environment variable.
+	noModelsHint:
+		"pi has no credentials: add a key to ~/.pi/agent/auth.json (`vercel-ai-gateway` for the Vercel AI Gateway)",
 	// -p runs once and exits, and pi merges piped stdin into the prompt.
 	// --mode json emits one session event per line, which is what the run
 	// view tails. Each node keeps its session under the run folder, so
 	// `dots debug` finds it however many runs later.
-	command: ({ sessionDir, model }) => [
+	command: ({ sessionDir, model, effort }) => [
 		"pi",
 		"-p",
 		"--mode",
@@ -259,6 +367,7 @@ export const PI: Harness = {
 		"--session-dir",
 		sessionDir,
 		...(model ? ["--model", model] : []),
+		...(effort ? ["--thinking", effort] : []),
 	],
 	// pi -p reads the prompt and closes stdin, so nothing can reach it after
 	// it starts. A node under a time budget still gets killed on expiry; it
