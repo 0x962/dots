@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HarnessId } from "../../../../core/harness";
 import type { HarnessCatalog } from "../../hooks/useHarnessCatalog";
+import { ModelCombobox } from "./components/ModelCombobox";
 
 /**
  * Picks what one node's agent runs on: the harness (the coding-agent CLI),
@@ -126,19 +127,11 @@ export function ModelPicker({
 
 			<div className="field">
 				<label>Model</label>
-				<select
-					className="select"
-					value={value.model ?? ""}
-					onChange={(e) =>
-						onChange({ ...value, model: e.target.value })
-					}
-				>
-					{shown.map((m) => (
-						<option key={m.id} value={m.id}>
-							{m.label}
-						</option>
-					))}
-				</select>
+				<ModelCombobox
+					models={shown}
+					value={value.model}
+					onPick={(id) => onChange({ ...value, model: id })}
+				/>
 				<span className="hint">
 					{loading
 						? "asking the harness what it can reach…"
