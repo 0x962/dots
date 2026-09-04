@@ -97,10 +97,9 @@ export function Inspector() {
 					<label>Harness</label>
 					<select
 						className="select"
-						value={bundle.doc.harness ?? ""}
-						onChange={(e) => setGraphHarness((e.target.value || undefined) as HarnessId | undefined)}
+						value={bundle.doc.harness ?? "claude"}
+						onChange={(e) => setGraphHarness(e.target.value as HarnessId)}
 					>
-						<option value="">Whatever the run asks for</option>
 						{catalogs.map((c) => (
 							<option key={c.id} value={c.id}>
 								{c.label}
@@ -108,8 +107,8 @@ export function Inspector() {
 						))}
 					</select>
 					<span className="hint">
-						the coding-agent CLI every node runs in, unless the node picks its own. A run
-						with no harness of its own uses claude, or DOTS_HARNESS.
+						what a new node in this graph starts on. Every node then carries its own
+						harness, so changing this leaves the nodes already drawn alone.
 					</span>
 				</div>
 

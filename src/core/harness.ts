@@ -82,6 +82,15 @@ export interface Harness {
 	catalog(): Promise<CatalogModel[]>;
 	/** What to tell someone whose catalog came back empty. */
 	noModelsHint: string;
+	/**
+	 * What a node starts on. Every node carries its own harness, model and
+	 * effort, so a node that has never been set gets these written into
+	 * graph.json the first time someone opens it. The model is passed to the
+	 * CLI as it is written here, whether or not the catalog lists it: a
+	 * harness with no credentials then fails with its own message instead of
+	 * silently running something else.
+	 */
+	seed: { model: string; effort: string };
 	/** The command that runs one node. The prompt arrives on stdin. */
 	command(spec: SpawnSpec): string[];
 	/**
@@ -181,6 +190,7 @@ export const CLAUDE: Harness = {
 	efforts: ["low", "medium", "high", "xhigh", "max"],
 	catalog: async () => CLAUDE_MODELS,
 	noModelsHint: "run `claude` once and sign in",
+	seed: { model: "opus", effort: "medium" },
 	// stream-json out emits one JSON line per event as the agent works, which
 	// is what lets the run view tail a node while it is still thinking.
 	// stream-json in keeps stdin open, so time-budget notices can reach a
@@ -343,11 +353,15 @@ export const PI: Harness = {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const [stdout] = await Promise.all([
+		// pi prints the model table on stderr and leaves stdout empty. Both
+		// streams are read and joined, so the table is still found if a later
+		// pi moves it to stdout.
+		const [stdout, stderr] = await Promise.all([
 			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
 			proc.exited,
 		]);
-		return parsePiModels(stdout);
+		return parsePiModels(`${stdout}\n${stderr}`);
 	},
 	// The dots server runs under launchd, whose environment carries PATH and
 	// nothing else, so an API key exported in a shell never reaches it. Keys
@@ -355,6 +369,7 @@ export const PI: Harness = {
 	// which is why that file is the answer and not an environment variable.
 	noModelsHint:
 		"pi has no credentials: add a key to ~/.pi/agent/auth.json (`vercel-ai-gateway` for the Vercel AI Gateway)",
+	seed: { model: "vercel-ai-gateway/meta/muse-spark-1.1", effort: "medium" },
 	// -p runs once and exits, and pi merges piped stdin into the prompt.
 	// --mode json emits one session event per line, which is what the run
 	// view tails. Each node keeps its session under the run folder, so

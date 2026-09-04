@@ -170,6 +170,7 @@ const server = Bun.serve({
 							label: h.label,
 							efforts: h.efforts,
 							noModelsHint: h.noModelsHint,
+							seed: h.seed,
 							models: await catalogFor(id, refresh),
 						};
 					}),

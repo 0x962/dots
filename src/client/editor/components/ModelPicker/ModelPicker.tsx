@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { HarnessId } from "../../../../core/harness";
 import type { HarnessCatalog } from "../../hooks/useHarnessCatalog";
 
@@ -42,6 +42,19 @@ export function ModelPicker({
 	const catalog = catalogs.find((c) => c.id === activeId);
 	const models = catalog?.models ?? [];
 
+	// Every node carries its own harness, model and effort. A node written
+	// before those fields existed carries none, so opening it writes the
+	// harness's starting values in and the node is explicit from then on.
+	useEffect(() => {
+		if (!catalog) return;
+		if (value.harness && value.model && value.effort) return;
+		onChange({
+			harness: value.harness ?? activeId,
+			model: value.model ?? catalog.seed.model,
+			effort: value.effort ?? catalog.seed.effort,
+		});
+	}, [catalog, value.harness, value.model, value.effort, activeId, onChange]);
+
 	const providers = [...new Set(models.map((m) => m.provider))].sort();
 	const multiProvider = providers.length > 1;
 	// The provider is not stored: it is the first segment of the model
@@ -63,20 +76,19 @@ export function ModelPicker({
 				<label>Harness</label>
 				<select
 					className="select"
-					value={value.harness ?? ""}
+					value={activeId}
 					onChange={(e) => {
 						setBrowsing(null);
+						// The new harness spells models and efforts its own way,
+						// so both start again from that harness's values.
+						const next = catalogs.find((c) => c.id === e.target.value);
 						onChange({
-							harness: (e.target.value || undefined) as HarnessId | undefined,
-							model: undefined,
-							effort: undefined,
+							harness: e.target.value as HarnessId,
+							model: next?.seed.model,
+							effort: next?.seed.effort,
 						});
 					}}
 				>
-					<option value="">
-						Graph default (
-						{catalogs.find((c) => c.id === fallbackHarness)?.label ?? fallbackHarness})
-					</option>
 					{catalogs.map((c) => (
 						<option key={c.id} value={c.id}>
 							{c.label}
@@ -94,8 +106,10 @@ export function ModelPicker({
 						value={provider}
 						onChange={(e) => {
 							setBrowsing(e.target.value);
-							// The old model belongs to the old provider.
-							onChange({ ...value, model: undefined, effort: undefined });
+							// The old model belongs to the old provider, so the
+							// first model of the new one takes its place.
+							const first = models.find((m) => m.provider === e.target.value);
+							onChange({ ...value, model: first?.id });
 						}}
 					>
 						{providers.map((p) => (
@@ -116,10 +130,9 @@ export function ModelPicker({
 					className="select"
 					value={value.model ?? ""}
 					onChange={(e) =>
-						onChange({ ...value, model: e.target.value || undefined })
+						onChange({ ...value, model: e.target.value })
 					}
 				>
-					<option value="">Default ({catalog?.label ?? activeId} picks)</option>
 					{shown.map((m) => (
 						<option key={m.id} value={m.id}>
 							{m.label}
@@ -142,10 +155,9 @@ export function ModelPicker({
 					value={value.effort ?? ""}
 					disabled={!canThink}
 					onChange={(e) =>
-						onChange({ ...value, effort: e.target.value || undefined })
+						onChange({ ...value, effort: e.target.value })
 					}
 				>
-					<option value="">Default ({catalog?.label ?? activeId} picks)</option>
 					{(catalog?.efforts ?? []).map((level) => (
 						<option key={level} value={level}>
 							{level}

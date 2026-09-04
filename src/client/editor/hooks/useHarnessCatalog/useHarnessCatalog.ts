@@ -7,6 +7,7 @@ export interface HarnessCatalog {
 	efforts: string[];
 	models: CatalogModel[];
 	noModelsHint: string;
+	seed: { model: string; effort: string };
 }
 
 /**

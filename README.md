@@ -67,7 +67,8 @@ editor's inspector, or write them into `graph.json`:
       "title": "Correctness",
       "children": [],
       "harness": "pi",
-      "model": "vercel-ai-gateway/meta/muse-spark-1.1"
+      "model": "vercel-ai-gateway/meta/muse-spark-1.1",
+      "effort": "high"
     }
   }
 }
@@ -96,7 +97,8 @@ them:
 | `pi` | `--thinking` | off, minimal, low, medium, high, xhigh |
 
 So an effort only means something beside the harness it was chosen for, and
-changing a node's harness clears its model and its effort. Not every model
+changing a node's harness starts its model and its effort again from the new
+harness's values. Not every model
 thinks: `pi --list-models` says which do, and the inspector greys the effort
 out on a model that does not.
 
