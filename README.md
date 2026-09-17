@@ -22,7 +22,7 @@ dots has three parts:
 
 The repository includes an example graph (`hello`) and a multi-agent code
 review graph (`review`), whose checkers post their findings as local
-review comments through [margin](https://github.com/0x962/margin).
+review comments through Trellis.
 
 ## Requirements
 
@@ -108,7 +108,7 @@ Two differences to know before you move a node to pi:
   so dots sends it "5 minutes left" notices; `pi -p` reads the prompt and
   closes stdin. A pi node under a budget is still killed on expiry, it just
   gets no warning first.
-- A pi node's margin comments carry no session pointer. Claude takes its
+- A pi node's Trellis review comments carry no session pointer. Claude takes its
   session id up front, so `$CLAUDE_SESSION_ID` is set before the agent
   runs; pi names its own session and reports it afterwards. The run file
   records that id either way, so `dots debug` and `dots ask` work on both.
@@ -158,7 +158,7 @@ A node can be run on its own, without the rest of the graph. The editor's
 inspector has a `Run this node` button beside the model picker; it opens
 the node with a target box, an input box, and the reply. The run board has
 the same thing on every node, including one the run never reached, which
-is how a single checker is fired at a pull request from margin's review
+is how a single checker is fired at a pull request from the Trellis review
 tab. The same thing
 from a terminal:
 

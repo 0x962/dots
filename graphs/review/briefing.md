@@ -1,6 +1,6 @@
 # Context: This run reviews a pull request. You are one agent in its graph.
 
-No agent in this run changes code. No file edits, no commits, no pushes, nothing posted to GitHub. GitHub is for humans. Findings leave this run as local review comments, created with the `margin` CLI; a person reads them at `localhost:4519/<pr-url>`.
+No agent in this run changes code. No file edits, no commits, no pushes, nothing posted to GitHub. GitHub is for humans. Findings leave this run as Trellis review comments. A person reads them on the Trellis Reviews page.
 
 # Notes & Recommendations
 
@@ -9,12 +9,13 @@ No agent in this run changes code. No file edits, no commits, no pushes, nothing
 - Post one comment per finding, anchored to the changed line:
 
   ```
-  margin add <pr-url> --path <path> --line <line> [--start-line <first line>] \
+  trellis review add <pr-url> --path <path> --line <line> [--start-line <first line>] \
     --author <your node name> --body '<body>'
   ```
 
   Line numbers are on the new side of the diff (pass `--side old` for a deleted line). Use `--body -` to pipe a long body on stdin.
-- Read what other nodes already posted with `margin list <pr-url>`, and do not repeat a finding that is already there.
+- Submit the comments before you return: `trellis review submit <pr-url> --threads <ids> --verdict commented --no-notify --body "<one sentence>"`.
+- Read what other nodes already posted with `trellis review list <pr-url>`, and do not repeat a finding that is already there.
 
 # Rules
 
